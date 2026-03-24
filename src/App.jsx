@@ -985,6 +985,8 @@ function AdminPlayers({ appData, onRefresh }) {
     setPlayers(prev=>prev.map(p=>p.email===email?{...p,paid}:p));
     flash(`${u.name} marked as ${paid?'PAID ✓':'UNPAID'}.`);
   };
+
+  const deletePlayer = async (email) => {
     if (!window.confirm(`Delete ${players.find(p=>p.email===email)?.name}? This cannot be undone.`)) return;
     await supabase.from('picks').delete().eq('email', email);
     await supabase.from('users').delete().eq('email', email);
