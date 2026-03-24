@@ -176,6 +176,18 @@ function calcResult(game, side) {
     : { won: awayFinal < Number(game.home_score), push: false };
 }
 
+function formatCT(ts) {
+  if (!ts) return "—";
+  try {
+    return new Date(ts).toLocaleString('en-US', {
+      timeZone: 'America/Chicago',
+      month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+      hour12: true
+    }) + ' CT';
+  } catch { return ts; }
+}
+
 // ── Supabase helpers ──────────────────────────────────────────
 const DB = {
   async getSetting(key)       { const {data} = await supabase.from('settings').select('value').eq('key',key).single(); return data?.value ?? null; },
@@ -193,7 +205,7 @@ const DB = {
   async deleteGame(id)  { await supabase.from('games').delete().eq('id',id); },
 
   async getPicks(email)  { const {data} = await supabase.from('picks').select('*, games(*)').eq('email',email); return data||[]; },
-  async getAllPicks()     { const {data} = await supabase.from('picks').select('*, games(*)'); return data||[]; },
+  async getAllPicks()     { const {data} = await supabase.from('picks').select('*, games(*)').order('created_at', {ascending: true}); return data||[]; },
   async upsertPick(p)    { await supabase.from('picks').upsert(p,{onConflict:'email,game_id'}); },
   async deletePick(e,g)  { await supabase.from('picks').delete().eq('email',e).eq('game_id',g); },
 
@@ -585,7 +597,12 @@ function HistoryView({ user }) {
           <div className="history-round-title">{ROUNDS[r-1]?.name||`Round ${r}`}</div>
           {byRound[r].map(pick => {
             const game = pick.games; if(!game) return null;
-            const team = pick.side==='away'?game.away_team:game.home_team;
+            const isAway = pick.side === 'away';
+            const team = isAway ? game.away_team : game.home_team;
+            const spread = game.spread;
+            const spreadLabel = isAway
+              ? (spread < 0 ? spread : `+${Math.abs(spread)}`)
+              : (spread < 0 ? `+${Math.abs(spread)}` : spread);
             let badge = null;
             if (game.status==="final") {
               const {won,push} = calcResult(game, pick.side);
@@ -596,7 +613,7 @@ function HistoryView({ user }) {
             return (
               <div key={pick.id} className="history-pick">
                 <span className="history-game">{game.away_team} vs {game.home_team}</span>
-                <span className="history-pick-team">▶ {team}</span>
+                <span className="history-pick-team">▶ {team} <span style={{color:'var(--gold)',fontFamily:'DM Mono,monospace',fontSize:11}}>{spreadLabel}</span></span>
                 <span className="history-wager">{pick.wager} pts</span>
                 {badge}
               </div>
@@ -612,9 +629,10 @@ function HistoryView({ user }) {
 // ADMIN VIEW
 // ============================================================
 function AdminView({ appData, onRefresh }) {
-  const { currentRound: activeRound, roundStatus } = appData;
+  const { currentRound: activeRound } = appData;
   const [adminRound, setAdminRound] = useState(activeRound);
   const [games, setGames]           = useState([]);
+  const [roundStatus, setRoundStatus] = useState(appData.roundStatus || {});
   const [msg, setMsg]               = useState(""); const [msgType, setMsgType] = useState("success");
   const [localScores, setLocalScores]   = useState({});
   const [localSpreads, setLocalSpreads] = useState({});
@@ -622,6 +640,7 @@ function AdminView({ appData, onRefresh }) {
   const [showAdd, setShowAdd]     = useState(false);
 
   useEffect(() => { loadGames(adminRound); }, [adminRound]);
+  useEffect(() => { setRoundStatus(appData.roundStatus || {}); }, [appData.roundStatus]);
 
   const loadGames = async (r) => {
     const g = await DB.getGames(r);
@@ -631,14 +650,20 @@ function AdminView({ appData, onRefresh }) {
     setLocalScores(sc); setLocalSpreads(sp);
   };
 
+  const reloadRoundStatus = async () => {
+    const rs = await DB.roundStatus();
+    setRoundStatus(rs);
+    return rs;
+  };
+
   const flash = (t, type="success") => { setMsg(t); setMsgType(type); setTimeout(()=>setMsg(""),3000); };
 
   const setActiveRound = async (r) => {
     const rNum = parseInt(r);
-    const rs = await DB.roundStatus();
+    const rs = await reloadRoundStatus();
     if (!rs[rNum]) rs[rNum]="open";
     await Promise.all([DB.setSetting('current_round',rNum.toString()), DB.setSetting('round_status',rs)]);
-    setAdminRound(rNum); flash(`Active round set to ${ROUNDS[rNum-1]?.name}.`); onRefresh();
+    setAdminRound(rNum); setRoundStatus({...rs}); flash(`Active round set to ${ROUNDS[rNum-1]?.name}.`); onRefresh();
   };
 
   const saveSpreads = async () => {
@@ -681,12 +706,21 @@ function AdminView({ appData, onRefresh }) {
   };
 
   const lockRound = async () => {
-    const rs = await DB.roundStatus(); rs[adminRound]="locked";
-    await DB.setSetting('round_status',rs); flash(`Round ${adminRound} locked.`); onRefresh();
+    const rs = await reloadRoundStatus();
+    rs[adminRound]="locked";
+    await DB.setSetting('round_status', rs);
+    setRoundStatus({...rs});
+    flash(`Round ${adminRound} locked — picks closed.`);
+    onRefresh();
   };
+
   const unlockRound = async () => {
-    const rs = await DB.roundStatus(); rs[adminRound]="open";
-    await DB.setSetting('round_status',rs); flash(`Round ${adminRound} re-opened.`); onRefresh();
+    const rs = await reloadRoundStatus();
+    rs[adminRound]="open";
+    await DB.setSetting('round_status', rs);
+    setRoundStatus({...rs});
+    flash(`Round ${adminRound} re-opened.`);
+    onRefresh();
   };
 
   const advanceRound = async () => {
@@ -711,9 +745,10 @@ function AdminView({ appData, onRefresh }) {
       const history = [...(u.history||[]), {round:adminRound, startPts, endPts:pts}];
       await DB.upsertUser({...u, rounds, history});
     }
-    const rs = await DB.roundStatus();
+    const rs = await reloadRoundStatus();
     rs[adminRound]="complete"; rs[nextRound]="open";
     await Promise.all([DB.setSetting('round_status',rs), DB.setSetting('current_round',nextRound.toString())]);
+    setRoundStatus({...rs});
     setAdminRound(nextRound); flash(`Advanced to ${ROUNDS[nextRound-1]?.name}!`); onRefresh(); loadGames(nextRound);
   };
 
@@ -941,6 +976,7 @@ function WagerLogView() {
       game:`${game.away_team} vs ${game.home_team}`,
       side:pick.side==='away'?game.away_team:game.home_team,
       spread:game.spread, wager:pick.wager,
+      submittedAt: pick.created_at,
       result:game.status==="final"?(push?'PUSH':won?'WIN':'LOSS'):'PENDING' };
   }).filter(Boolean);
 
@@ -976,19 +1012,21 @@ function WagerLogView() {
       {loading && <div className="empty-state">Loading wagers...</div>}
       {!loading && (
         <div style={{background:'var(--hardwood)',border:'1px solid var(--line)'}}>
-          <div style={{display:'grid',gridTemplateColumns:'120px 100px 1fr 120px 70px 70px 70px',padding:'8px 16px',borderBottom:'1px solid var(--line)',fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)',letterSpacing:1}}>
+          <div style={{display:'grid',gridTemplateColumns:'110px 90px 1fr 110px 60px 60px 90px 70px',padding:'8px 16px',borderBottom:'1px solid var(--line)',fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)',letterSpacing:1}}>
             <span>PLAYER</span><span>ROUND</span><span>GAME</span><span>PICKED</span>
-            <span style={{textAlign:'right'}}>SPREAD</span><span style={{textAlign:'right'}}>WAGER</span><span style={{textAlign:'right'}}>RESULT</span>
+            <span style={{textAlign:'right'}}>SPREAD</span><span style={{textAlign:'right'}}>WAGER</span>
+            <span style={{textAlign:'right'}}>SUBMITTED</span><span style={{textAlign:'right'}}>RESULT</span>
           </div>
           {filtered.length===0 && <div className="empty-state">No wagers match your filters.</div>}
           {filtered.map((w,i) => (
-            <div key={i} style={{display:'grid',gridTemplateColumns:'120px 100px 1fr 120px 70px 70px 70px',padding:'10px 16px',borderBottom:'1px solid rgba(255,255,255,0.03)',fontSize:13,alignItems:'center',background:i%2===0?'transparent':'rgba(255,255,255,0.02)'}}>
+            <div key={i} style={{display:'grid',gridTemplateColumns:'110px 90px 1fr 110px 60px 60px 90px 70px',padding:'10px 16px',borderBottom:'1px solid rgba(255,255,255,0.03)',fontSize:13,alignItems:'center',background:i%2===0?'transparent':'rgba(255,255,255,0.02)'}}>
               <span style={{fontWeight:600}}>{w.name}</span>
               <span style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)'}}>{ROUNDS[w.round-1]?.name?.replace('Round of ','R')||`R${w.round}`}</span>
               <span style={{color:'var(--chalk-dim)',fontSize:12,fontFamily:'DM Mono,monospace'}}>{w.game}</span>
               <span style={{color:'var(--kelly)',fontSize:12,fontWeight:600}}>{w.side}</span>
               <span style={{textAlign:'right',fontFamily:'DM Mono,monospace',fontSize:12,color:'var(--gold)'}}>{w.spread}</span>
               <span style={{textAlign:'right',fontFamily:'DM Mono,monospace',fontSize:13}}>{w.wager}</span>
+              <span style={{textAlign:'right',fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)'}}>{formatCT(w.submittedAt)}</span>
               <span style={{textAlign:'right',fontFamily:'DM Mono,monospace',fontSize:11,color:w.result==='WIN'?'var(--green)':w.result==='LOSS'?'var(--red)':w.result==='PUSH'?'var(--gold)':'var(--chalk-dim)'}}>{w.result}</span>
             </div>
           ))}
@@ -1012,7 +1050,6 @@ function NotificationsView({ onRefresh }) {
   const clearAll    = async ()   => { await DB.clearNotifications(); setNotes([]); };
 
   const unreadCount = notes.filter(n=>!n.read).length;
-  const formatTime  = (ts) => { try { const d=new Date(ts); return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' · '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}); } catch { return ts; } };
 
   return (
     <div>
@@ -1033,7 +1070,7 @@ function NotificationsView({ onRefresh }) {
               <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4,flexWrap:'wrap'}}>
                 {!note.read && <span style={{background:'var(--kelly)',color:'var(--court)',fontSize:9,fontFamily:'DM Mono,monospace',padding:'2px 6px',letterSpacing:1}}>NEW</span>}
                 <span style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)'}}>{note.type==='forgot_password'?'PASSWORD RESET REQUEST':'NOTIFICATION'}</span>
-                <span style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)',marginLeft:'auto'}}>{formatTime(note.created_at)}</span>
+                <span style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)',marginLeft:'auto'}}>{formatCT(note.created_at)}</span>
               </div>
               <div style={{fontSize:15,color:'var(--chalk)',marginBottom:6}}>{note.message}</div>
               {note.type==='forgot_password' && <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)'}}>→ Go to <strong style={{color:'var(--kelly)'}}>ADMIN → Registered Players</strong> to reset their password.</div>}
