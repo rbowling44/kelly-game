@@ -325,6 +325,7 @@ export default function App() {
         <button className={`nav-tab ${tab==='board'?'active':''}`} onClick={()=>setTab('board')}>LEADERBOARD</button>
         {!currentUser?.isAdmin && <button className={`nav-tab ${tab==='history'?'active':''}`} onClick={()=>setTab('history')}>HISTORY</button>}
         {currentUser?.isAdmin && <button className={`nav-tab ${tab==='admin'?'active':''}`} onClick={()=>setTab('admin')}>ADMIN</button>}
+        {currentUser?.isAdmin && <button className={`nav-tab ${tab==='wagers'?'active':''}`} onClick={()=>setTab('wagers')}>WAGER LOG</button>}
       </nav>
 
       <main className="main">
@@ -332,6 +333,7 @@ export default function App() {
         {tab === 'board' && <LeaderboardView currentEmail={user.email} />}
         {tab === 'history' && !currentUser?.isAdmin && <HistoryView user={currentUser} />}
         {tab === 'admin' && currentUser?.isAdmin && <AdminView onRefresh={refresh} />}
+        {tab === 'wagers' && currentUser?.isAdmin && <WagerLogView />}
       </main>
     </div>
   );
@@ -1097,10 +1099,11 @@ function AdminPlayers({ onRefresh }) {
   const currentRound = DB.currentRound();
   const [playerList, setPlayerList] = useState(Object.values(DB.users()).filter(u=>!u.isAdmin));
   const [editPts, setEditPts] = useState({});
+  const [editPwd, setEditPwd] = useState({});
   const [startPts, setStartPts] = useState(DB.startingPoints().toString());
   const [msg, setMsg] = useState("");
 
-  const flash = (t) => { setMsg(t); setTimeout(()=>setMsg(""), 2500); };
+  const flash = (t) => { setMsg(t); setTimeout(()=>setMsg(""), 3000); };
 
   const saveStartingPoints = () => {
     const val = parseInt(startPts);
@@ -1119,6 +1122,16 @@ function AdminPlayers({ onRefresh }) {
     setPlayerList(Object.values(DB.users()).filter(u=>!u.isAdmin));
     flash(`Updated ${users[email].name} to ${val} pts.`);
     if (onRefresh) onRefresh();
+  };
+
+  const resetPassword = (email) => {
+    const newPwd = editPwd[email]?.trim();
+    if (!newPwd || newPwd.length < 4) return flash("Password must be at least 4 characters.");
+    const users = DB.users();
+    users[email].password = btoa(newPwd);
+    DB.saveUsers(users);
+    setEditPwd(prev => ({...prev, [email]: ""}));
+    flash(`Password reset for ${users[email].name}.`);
   };
 
   return (
@@ -1142,7 +1155,7 @@ function AdminPlayers({ onRefresh }) {
         </div>
       </div>
 
-      {/* ── Player List with Override ── */}
+      {/* ── Player List with Override + Password Reset ── */}
       <div className="admin-title">REGISTERED PLAYERS ({playerList.length})</div>
       {playerList.length === 0 && <div className="empty-state">No players registered yet.</div>}
       {playerList.map(u => {
@@ -1153,12 +1166,11 @@ function AdminPlayers({ onRefresh }) {
               <div style={{fontWeight:600, fontSize:15}}>{u.name}</div>
               <div style={{fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)'}}>{u.email}</div>
             </div>
-            <span className="tag tag-open" style={{fontSize:13, padding:'4px 12px'}}>
-              {pts} PTS
-            </span>
+            <span className="tag tag-open" style={{fontSize:13, padding:'4px 12px'}}>{pts} PTS</span>
+
             {/* Point override */}
             <div style={{display:'flex', alignItems:'center', gap:6}}>
-              <div style={{fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)'}}>OVERRIDE</div>
+              <div style={{fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)'}}>PTS OVERRIDE</div>
               <input
                 type="number" min="0"
                 placeholder={pts.toString()}
@@ -1173,9 +1185,144 @@ function AdminPlayers({ onRefresh }) {
                 SET
               </button>
             </div>
+
+            {/* Password reset */}
+            <div style={{display:'flex', alignItems:'center', gap:6}}>
+              <div style={{fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)'}}>NEW PASSWORD</div>
+              <input
+                type="text"
+                placeholder="new password"
+                style={{background:'rgba(255,255,255,0.05)', border:'1px solid var(--line)', color:'var(--chalk)', padding:'5px 10px', fontFamily:'DM Mono,monospace', fontSize:13, width:130, outline:'none'}}
+                value={editPwd[u.email] ?? ""}
+                onChange={e => setEditPwd(prev => ({...prev, [u.email]: e.target.value}))}
+              />
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{opacity: editPwd[u.email] ? 1 : 0.4, fontSize:11}}
+                onClick={() => resetPassword(u.email)}>
+                RESET
+              </button>
+            </div>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ============================================================
+// WAGER LOG VIEW (admin only)
+// ============================================================
+function WagerLogView() {
+  const allPicks = DB.picks();
+  const games = DB.games();
+  const users = DB.users();
+  const currentRound = DB.currentRound();
+
+  const [filterPlayer, setFilterPlayer] = useState("all");
+  const [filterRound, setFilterRound] = useState("all");
+
+  const playerList = Object.values(users).filter(u => !u.isAdmin);
+
+  // Build flat list of all wagers
+  const allWagers = [];
+  Object.entries(allPicks).forEach(([email, picks]) => {
+    const u = users[email];
+    if (!u || u.isAdmin) return;
+    Object.entries(picks).forEach(([gid, pick]) => {
+      const game = games.find(g => g.id === gid);
+      allWagers.push({
+        email,
+        name: u.name,
+        round: pick.round,
+        gameId: gid,
+        game: game ? `${game.awayTeam} vs ${game.homeTeam}` : gid,
+        side: game ? (pick.side === 'away' ? game.awayTeam : game.homeTeam) : pick.side,
+        spread: game?.spread ?? '?',
+        wager: pick.wager,
+        status: game?.status ?? 'unknown',
+        result: game?.status === 'final' ? (() => {
+          const { won, push } = calcResult(game, pick.side);
+          return push ? 'PUSH' : won ? 'WIN' : 'LOSS';
+        })() : 'PENDING'
+      });
+    });
+  });
+
+  // Apply filters
+  const filtered = allWagers
+    .filter(w => filterPlayer === "all" || w.email === filterPlayer)
+    .filter(w => filterRound === "all" || w.round === parseInt(filterRound))
+    .sort((a, b) => a.round - b.round || a.name.localeCompare(b.name));
+
+  const totalWagered = filtered.reduce((s, w) => s + (w.wager || 0), 0);
+  const wins = filtered.filter(w => w.result === 'WIN').length;
+  const losses = filtered.filter(w => w.result === 'LOSS').length;
+
+  return (
+    <div>
+      <div className="round-banner">
+        <div className="round-name">WAGER LOG</div>
+        <div className="round-dates">Full audit of all picks</div>
+      </div>
+
+      {/* Filters */}
+      <div style={{display:'flex', gap:12, marginBottom:20, flexWrap:'wrap', alignItems:'flex-end'}}>
+        <div className="field" style={{marginBottom:0}}>
+          <label>FILTER BY PLAYER</label>
+          <select value={filterPlayer} onChange={e=>setFilterPlayer(e.target.value)}>
+            <option value="all">All Players</option>
+            {playerList.map(u => <option key={u.email} value={u.email}>{u.name}</option>)}
+          </select>
+        </div>
+        <div className="field" style={{marginBottom:0}}>
+          <label>FILTER BY ROUND</label>
+          <select value={filterRound} onChange={e=>setFilterRound(e.target.value)}>
+            <option value="all">All Rounds</option>
+            {ROUNDS.map(r => <option key={r.num} value={r.num}>{r.name}</option>)}
+          </select>
+        </div>
+        <div style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'var(--chalk-dim)', paddingBottom:8}}>
+          {filtered.length} picks · {totalWagered} pts wagered · {wins}W {losses}L
+        </div>
+      </div>
+
+      {/* Table */}
+      <div style={{background:'var(--hardwood)', border:'1px solid var(--line)'}}>
+        <div style={{display:'grid', gridTemplateColumns:'120px 100px 1fr 120px 70px 70px 70px',
+          padding:'8px 16px', borderBottom:'1px solid var(--line)',
+          fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)', letterSpacing:1}}>
+          <span>PLAYER</span>
+          <span>ROUND</span>
+          <span>GAME</span>
+          <span>PICKED</span>
+          <span style={{textAlign:'right'}}>SPREAD</span>
+          <span style={{textAlign:'right'}}>WAGER</span>
+          <span style={{textAlign:'right'}}>RESULT</span>
+        </div>
+
+        {filtered.length === 0 && <div className="empty-state">No wagers match your filters.</div>}
+
+        {filtered.map((w, i) => (
+          <div key={i} style={{display:'grid', gridTemplateColumns:'120px 100px 1fr 120px 70px 70px 70px',
+            padding:'10px 16px', borderBottom:'1px solid rgba(255,255,255,0.03)',
+            fontSize:13, alignItems:'center',
+            background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'}}>
+            <span style={{fontWeight:600, color:'var(--chalk)'}}>{w.name}</span>
+            <span style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'var(--chalk-dim)'}}>
+              {ROUNDS[w.round-1]?.name?.replace('Round of ','R') || `R${w.round}`}
+            </span>
+            <span style={{color:'var(--chalk-dim)', fontSize:12, fontFamily:'DM Mono,monospace'}}>{w.game}</span>
+            <span style={{color:'var(--kelly)', fontSize:12, fontWeight:600}}>{w.side}</span>
+            <span style={{textAlign:'right', fontFamily:'DM Mono,monospace', fontSize:12, color:'var(--gold)'}}>{w.spread}</span>
+            <span style={{textAlign:'right', fontFamily:'DM Mono,monospace', fontSize:13, color:'var(--chalk)'}}>{w.wager}</span>
+            <span style={{textAlign:'right', fontFamily:'DM Mono,monospace', fontSize:11,
+              color: w.result === 'WIN' ? 'var(--green)' : w.result === 'LOSS' ? 'var(--red)' : w.result === 'PUSH' ? 'var(--gold)' : 'var(--chalk-dim)'}}>
+              {w.result}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
