@@ -229,6 +229,13 @@ const DB = {
   saveRoundStatus: (s) => DB.set('ncaa_round_status', s),
   startingPoints: () => DB.get('ncaa_starting_pts') ?? 100,
   saveStartingPoints: (n) => DB.set('ncaa_starting_pts', n),
+  notifications: () => DB.get('ncaa_notifications') || [],
+  saveNotifications: (n) => DB.set('ncaa_notifications', n),
+  addNotification: (note) => {
+    const notes = DB.notifications();
+    notes.unshift({ ...note, id: Date.now(), ts: new Date().toISOString(), read: false });
+    DB.saveNotifications(notes);
+  },
 };
 
 const ROUNDS = [
@@ -326,6 +333,16 @@ export default function App() {
         {!currentUser?.isAdmin && <button className={`nav-tab ${tab==='history'?'active':''}`} onClick={()=>setTab('history')}>HISTORY</button>}
         {currentUser?.isAdmin && <button className={`nav-tab ${tab==='admin'?'active':''}`} onClick={()=>setTab('admin')}>ADMIN</button>}
         {currentUser?.isAdmin && <button className={`nav-tab ${tab==='wagers'?'active':''}`} onClick={()=>setTab('wagers')}>WAGER LOG</button>}
+        {currentUser?.isAdmin && (
+          <button className={`nav-tab ${tab==='notifications'?'active':''}`} onClick={()=>setTab('notifications')} style={{position:'relative'}}>
+            NOTIFICATIONS
+            {DB.notifications().filter(n=>!n.read).length > 0 && (
+              <span style={{position:'absolute',top:6,right:4,background:'var(--red)',color:'#fff',borderRadius:'50%',width:16,height:16,fontSize:10,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'DM Mono,monospace'}}>
+                {DB.notifications().filter(n=>!n.read).length}
+              </span>
+            )}
+          </button>
+        )}
       </nav>
 
       <main className="main">
@@ -334,6 +351,7 @@ export default function App() {
         {tab === 'history' && !currentUser?.isAdmin && <HistoryView user={currentUser} />}
         {tab === 'admin' && currentUser?.isAdmin && <AdminView onRefresh={refresh} />}
         {tab === 'wagers' && currentUser?.isAdmin && <WagerLogView />}
+        {tab === 'notifications' && currentUser?.isAdmin && <NotificationsView onRefresh={refresh} />}
       </main>
     </div>
   );
@@ -353,12 +371,13 @@ function AuthScreen({ onLogin }) {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
 
   const submit = () => {
     setError("");
     if (!email || !password) return setError("Email and password required.");
     const users = DB.users();
-
     if (mode === "login") {
       const u = users[email.toLowerCase()];
       if (!u || u.password !== btoa(password)) return setError("Invalid credentials.");
@@ -374,6 +393,42 @@ function AuthScreen({ onLogin }) {
       onLogin(newUser);
     }
   };
+
+  const submitForgot = () => {
+    if (!forgotEmail) return;
+    const users = DB.users();
+    const u = users[forgotEmail.toLowerCase()];
+    if (!u) { setError("No account found with that email."); return; }
+    DB.addNotification({ type: 'forgot_password', email: forgotEmail.toLowerCase(), name: u.name, message: `${u.name} (${forgotEmail}) requested a password reset.` });
+    setForgotSent(true);
+  };
+
+  if (mode === "forgot") {
+    return (
+      <div className="auth-wrap">
+        <div className="auth-card">
+          <div className="auth-title">THE KELLY GAME</div>
+          <div className="auth-sub">PASSWORD RESET</div>
+          {forgotSent ? (
+            <>
+              <div className="success-msg">✓ Request sent! The commissioner will reset your password shortly.</div>
+              <button className="btn btn-ghost btn-full" style={{marginTop:12}} onClick={()=>{setMode("login");setForgotSent(false);setForgotEmail("");}}>BACK TO LOGIN</button>
+            </>
+          ) : (
+            <>
+              {error && <div className="error-msg">{error}</div>}
+              <div className="field">
+                <label>YOUR EMAIL</label>
+                <input type="email" value={forgotEmail} onChange={e=>setForgotEmail(e.target.value)} placeholder="you@email.com" onKeyDown={e=>e.key==='Enter'&&submitForgot()} />
+              </div>
+              <button className="btn btn-orange btn-full" onClick={submitForgot}>SEND RESET REQUEST</button>
+              <div className="auth-switch"><button onClick={()=>setMode("login")}>Back to login</button></div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="auth-wrap">
@@ -398,6 +453,14 @@ function AuthScreen({ onLogin }) {
         <button className="btn btn-orange btn-full" onClick={submit}>
           {mode === "login" ? "SIGN IN" : "JOIN THE GAME"}
         </button>
+        {mode === "login" && (
+          <div style={{textAlign:'center', marginTop:10}}>
+            <button style={{background:'none',border:'none',color:'var(--chalk-dim)',cursor:'pointer',fontFamily:'DM Mono,monospace',fontSize:11,textDecoration:'underline'}}
+              onClick={()=>{setMode("forgot");setError("");}}>
+              Forgot password?
+            </button>
+          </div>
+        )}
         <div className="auth-switch">
           {mode === "login" ? (
             <>New player? <button onClick={()=>setMode("register")}>Create account</button></>
@@ -788,18 +851,19 @@ function AdminView({ onRefresh }) {
   const [msg, setMsg] = useState("");
   const [msgType, setMsgType] = useState("success");
   const currentRound = DB.currentRound();
+  const [adminRound, setAdminRound] = useState(currentRound);
   const roundStatuses = DB.roundStatus();
-  const games = DB.games().filter(g => g.round === currentRound);
+  const games = DB.games().filter(g => g.round === adminRound);
   const [localScores, setLocalScores] = useState(() => {
     const initial = {};
-    DB.games().filter(g => g.round === currentRound).forEach(g => {
+    DB.games().filter(g => g.round === adminRound).forEach(g => {
       initial[g.id] = { away: g.awayScore ?? "", home: g.homeScore ?? "" };
     });
     return initial;
   });
   const [localSpreads, setLocalSpreads] = useState(() => {
     const initial = {};
-    DB.games().filter(g => g.round === currentRound).forEach(g => {
+    DB.games().filter(g => g.round === adminRound).forEach(g => {
       initial[g.id] = g.spread?.toString() ?? "";
     });
     return initial;
@@ -807,7 +871,36 @@ function AdminView({ onRefresh }) {
   const [newGame, setNewGame] = useState(BLANK_GAME);
   const [showAddGame, setShowAddGame] = useState(false);
 
+  // When admin switches round, reload local scores/spreads
+  const switchRound = (r) => {
+    const rNum = parseInt(r);
+    setAdminRound(rNum);
+    const newScores = {};
+    const newSpreads = {};
+    DB.games().filter(g => g.round === rNum).forEach(g => {
+      newScores[g.id] = { away: g.awayScore ?? "", home: g.homeScore ?? "" };
+      newSpreads[g.id] = g.spread?.toString() ?? "";
+    });
+    setLocalScores(newScores);
+    setLocalSpreads(newSpreads);
+    setShowAddGame(false);
+    setMsg("");
+  };
+
+  // Set current active round (affects players)
   const flash = (text, type="success") => { setMsg(text); setMsgType(type); setTimeout(()=>setMsg(""), 3000); };
+
+  const setActiveRound = (r) => {
+    const rNum = parseInt(r);
+    const s = DB.roundStatus();
+    if (!s[rNum]) s[rNum] = "open";
+    DB.saveRoundStatus(s);
+    DB.saveRound(rNum);
+    setAdminRound(rNum);
+    switchRound(rNum);
+    flash(`Active round set to ${ROUNDS[rNum-1]?.name}. Players will now see Round ${rNum} games.`);
+    onRefresh();
+  };
 
   const savespreads = () => {
     const allGames = DB.games();
@@ -841,13 +934,16 @@ function AdminView({ onRefresh }) {
     if (!awayTeam || !homeTeam || spread === "") return flash("Fill in both teams and a spread.", "error");
     const allGames = DB.games();
     const id = `g${Date.now()}`;
-    allGames.push({ id, round: currentRound, region, awayTeam, awaySeed: parseInt(awaySeed)||0,
+    const newG = { id, round: adminRound, region, awayTeam, awaySeed: parseInt(awaySeed)||0,
       homeTeam, homeSeed: parseInt(homeSeed)||0, spread: parseFloat(spread), status: "open",
-      awayScore: null, homeScore: null, gameTime, tipoff: tipoff || null, lockedOverride: null });
+      awayScore: null, homeScore: null, gameTime, tipoff: tipoff || null, lockedOverride: null };
+    allGames.push(newG);
     DB.saveGames(allGames);
+    setLocalScores(prev => ({...prev, [id]: {away:"", home:""}}));
+    setLocalSpreads(prev => ({...prev, [id]: spread}));
     setNewGame(BLANK_GAME);
     setShowAddGame(false);
-    flash(`Added: ${awayTeam} vs ${homeTeam}`);
+    flash(`Added: ${awayTeam} vs ${homeTeam} to ${ROUNDS[adminRound-1]?.name}`);
     onRefresh();
   };
 
@@ -861,38 +957,39 @@ function AdminView({ onRefresh }) {
 
   const lockRound = () => {
     const s = DB.roundStatus();
-    s[currentRound] = "locked";
+    s[adminRound] = "locked";
     DB.saveRoundStatus(s);
-    onRefresh(); flash("Round locked — no more picks accepted.");
+    onRefresh(); flash(`Round ${adminRound} locked — no more picks accepted.`);
   };
 
   const unlockRound = () => {
     const s = DB.roundStatus();
-    s[currentRound] = "open";
+    s[adminRound] = "open";
     DB.saveRoundStatus(s);
-    onRefresh(); flash("Round re-opened — picks accepted again.");
+    onRefresh(); flash(`Round ${adminRound} re-opened — picks accepted again.`);
   };
 
   const advanceRound = () => {
     const s = DB.roundStatus();
-    const nextRound = currentRound + 1;
+    const nextRound = adminRound + 1;
     if (nextRound > 6) return flash("Tournament complete — no more rounds!");
-    const unfinished = DB.games().filter(g => g.round === currentRound && g.status !== "final");
+    const unfinished = DB.games().filter(g => g.round === adminRound && g.status !== "final");
     if (unfinished.length > 0) return flash(`${unfinished.length} game(s) still missing final scores. Enter scores before advancing.`, "error");
 
     const allGames = DB.games();
     const picks = DB.picks();
     const users = DB.users();
-    const roundGames = allGames.filter(g => g.round === currentRound);
+    const roundGames = allGames.filter(g => g.round === adminRound);
+    const sp = DB.startingPoints();
 
     Object.entries(users).forEach(([email, u]) => {
       if (u.isAdmin) return;
       const myPicks = picks[email] || {};
-      const startPts = u.rounds?.[currentRound] ?? 100;
+      const startPts = u.rounds?.[adminRound] ?? sp;
       let pts = startPts;
       roundGames.forEach(game => {
         const pick = myPicks[game.id];
-        if (!pick || pick.round !== currentRound) return;
+        if (!pick || pick.round !== adminRound) return;
         if (game.status === "final") {
           const { won, push } = calcResult(game, pick.side);
           if (!push) pts += won ? pick.wager : -pick.wager;
@@ -901,15 +998,18 @@ function AdminView({ onRefresh }) {
       u.rounds = u.rounds || {};
       u.rounds[nextRound] = Math.max(0, pts);
       u.history = u.history || [];
-      u.history.push({ round: currentRound, startPts, endPts: pts });
+      u.history.push({ round: adminRound, startPts, endPts: pts });
     });
 
     DB.saveUsers(users);
-    s[currentRound] = "complete";
+    s[adminRound] = "complete";
     s[nextRound] = "open";
     DB.saveRoundStatus(s);
     DB.saveRound(nextRound);
-    flash(`Advanced to ${ROUNDS[nextRound-1]?.name}! Point totals updated for all players.`);    onRefresh();
+    setAdminRound(nextRound);
+    switchRound(nextRound);
+    flash(`Advanced to ${ROUNDS[nextRound-1]?.name}! Point totals updated for all players.`);
+    onRefresh();
   };
 
   const toggleGameLock = (gid) => {
@@ -928,17 +1028,37 @@ function AdminView({ onRefresh }) {
   const setSpread = (gid, val) => setLocalSpreads(prev => ({ ...prev, [gid]: val }));
   const setNG = (k, v) => setNewGame(prev => ({ ...prev, [k]: v }));
 
-  const roundStatus = roundStatuses[currentRound] || "open";
+  const roundStatus = roundStatuses[adminRound] || "open";
+  const activeRound = DB.currentRound();
 
   return (
     <div>
-      <div className="round-banner">
+      <div className="round-banner" style={{flexWrap:'wrap', gap:12}}>
         <div>
           <div className="round-name">COMMISSIONER PANEL</div>
-          <div className="round-dates">{ROUNDS[currentRound-1]?.name} · {ROUNDS[currentRound-1]?.dates}</div>
+          <div className="round-dates">{ROUNDS[adminRound-1]?.name} · {ROUNDS[adminRound-1]?.dates}</div>
         </div>
-        <div className={`round-status status-${roundStatus}`}>
-          {roundStatus === "open" ? "● PICKS OPEN" : roundStatus === "locked" ? "■ PICKS LOCKED" : "✓ COMPLETE"}
+        {/* Round selector */}
+        <div style={{display:'flex', alignItems:'center', gap:10, flexWrap:'wrap'}}>
+          <div style={{fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)', letterSpacing:1}}>VIEW/EDIT ROUND</div>
+          <select
+            value={adminRound}
+            onChange={e => switchRound(e.target.value)}
+            style={{background:'var(--grain)', border:'1px solid var(--line)', color:'var(--chalk)', padding:'6px 10px', fontFamily:'DM Mono,monospace', fontSize:13, outline:'none', cursor:'pointer'}}>
+            {ROUNDS.map(r => (
+              <option key={r.num} value={r.num}>
+                {r.name} {r.num === activeRound ? '← ACTIVE' : ''}
+              </option>
+            ))}
+          </select>
+          {adminRound !== activeRound && (
+            <button className="btn btn-green btn-sm" onClick={() => setActiveRound(adminRound)}>
+              SET AS ACTIVE ROUND
+            </button>
+          )}
+          <div className={`round-status status-${roundStatus}`}>
+            {roundStatus === "open" ? "● PICKS OPEN" : roundStatus === "locked" ? "■ PICKS LOCKED" : "✓ COMPLETE"}
+          </div>
         </div>
       </div>
 
@@ -947,7 +1067,7 @@ function AdminView({ onRefresh }) {
       {/* ── GAMES & SPREADS ── */}
       <div className="admin-section">
         <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16}}>
-          <div className="admin-title" style={{marginBottom:0}}>GAMES &amp; SPREADS — Round {currentRound}</div>
+          <div className="admin-title" style={{marginBottom:0}}>GAMES &amp; SPREADS — {ROUNDS[adminRound-1]?.name}</div>
           <button className="btn btn-orange btn-sm" onClick={()=>setShowAddGame(v=>!v)}>
             {showAddGame ? "✕ CANCEL" : "+ ADD GAME"}
           </button>
@@ -1065,22 +1185,22 @@ function AdminView({ onRefresh }) {
 
       {/* ── ROUND CONTROLS ── */}
       <div className="admin-section">
-        <div className="admin-title">ROUND CONTROLS</div>
+        <div className="admin-title">ROUND CONTROLS — {ROUNDS[adminRound-1]?.name}</div>
         <div style={{display:'flex', gap:12, flexWrap:'wrap', marginBottom:12}}>
           {roundStatus === "open" && (
-            <button className="btn btn-red" onClick={lockRound}>🔒 LOCK ROUND {currentRound} — CLOSE PICKS</button>
+            <button className="btn btn-red" onClick={lockRound}>🔒 LOCK ROUND {adminRound} — CLOSE PICKS</button>
           )}
           {roundStatus === "locked" && (
             <button className="btn btn-ghost" onClick={unlockRound}>🔓 RE-OPEN PICKS</button>
           )}
-          {roundStatus !== "open" && currentRound < 6 && (
+          {roundStatus !== "open" && adminRound < 6 && (
             <button className="btn btn-green" onClick={advanceRound}>
-              ▶ SETTLE &amp; ADVANCE TO {ROUNDS[currentRound]?.name?.toUpperCase()}
+              ▶ SETTLE &amp; ADVANCE TO {ROUNDS[adminRound]?.name?.toUpperCase()}
             </button>
           )}
         </div>
         <div style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'var(--chalk-dim)'}}>
-          Round {currentRound} · {ROUNDS[currentRound-1]?.name} · {roundStatus.toUpperCase()} · {games.filter(g=>g.status==='final').length}/{games.length} games final
+          Viewing Round {adminRound} · Active Round {activeRound} · {roundStatus.toUpperCase()} · {games.filter(g=>g.status==='final').length}/{games.length} games final
         </div>
       </div>
 
@@ -1320,6 +1440,116 @@ function WagerLogView() {
               color: w.result === 'WIN' ? 'var(--green)' : w.result === 'LOSS' ? 'var(--red)' : w.result === 'PUSH' ? 'var(--gold)' : 'var(--chalk-dim)'}}>
               {w.result}
             </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// NOTIFICATIONS VIEW (admin only)
+// ============================================================
+function NotificationsView({ onRefresh }) {
+  const [notes, setNotes] = useState(DB.notifications());
+
+  const markRead = (id) => {
+    const updated = notes.map(n => n.id === id ? {...n, read: true} : n);
+    DB.saveNotifications(updated);
+    setNotes(updated);
+    if (onRefresh) onRefresh();
+  };
+
+  const markAllRead = () => {
+    const updated = notes.map(n => ({...n, read: true}));
+    DB.saveNotifications(updated);
+    setNotes(updated);
+    if (onRefresh) onRefresh();
+  };
+
+  const deleteNote = (id) => {
+    const updated = notes.filter(n => n.id !== id);
+    DB.saveNotifications(updated);
+    setNotes(updated);
+  };
+
+  const clearAll = () => {
+    DB.saveNotifications([]);
+    setNotes([]);
+  };
+
+  const unreadCount = notes.filter(n => !n.read).length;
+
+  const formatTime = (ts) => {
+    try {
+      const d = new Date(ts);
+      return d.toLocaleDateString('en-US', {month:'short', day:'numeric'}) + ' · ' +
+        d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
+    } catch { return ts; }
+  };
+
+  return (
+    <div>
+      <div className="round-banner">
+        <div>
+          <div className="round-name">NOTIFICATIONS</div>
+          <div className="round-dates">{unreadCount} unread · {notes.length} total</div>
+        </div>
+        <div style={{display:'flex', gap:8}}>
+          {unreadCount > 0 && (
+            <button className="btn btn-ghost btn-sm" onClick={markAllRead}>MARK ALL READ</button>
+          )}
+          {notes.length > 0 && (
+            <button className="btn btn-ghost btn-sm" style={{color:'var(--red)',borderColor:'rgba(231,76,60,0.3)'}}
+              onClick={clearAll}>CLEAR ALL</button>
+          )}
+        </div>
+      </div>
+
+      {notes.length === 0 && (
+        <div className="empty-state">No notifications yet. Password reset requests will appear here.</div>
+      )}
+
+      <div style={{display:'flex', flexDirection:'column', gap:8}}>
+        {notes.map(note => (
+          <div key={note.id} style={{
+            background: note.read ? 'var(--hardwood)' : 'rgba(77,189,92,0.06)',
+            border: note.read ? '1px solid var(--line)' : '1px solid rgba(77,189,92,0.25)',
+            padding:'16px 20px',
+            display:'flex', alignItems:'flex-start', gap:16
+          }}>
+            <div style={{fontSize:24, flexShrink:0}}>
+              {note.type === 'forgot_password' ? '🔑' : '📣'}
+            </div>
+            <div style={{flex:1}}>
+              <div style={{display:'flex', alignItems:'center', gap:10, marginBottom:4, flexWrap:'wrap'}}>
+                {!note.read && (
+                  <span style={{background:'var(--kelly)', color:'var(--court)', fontSize:9,
+                    fontFamily:'DM Mono,monospace', padding:'2px 6px', letterSpacing:1}}>NEW</span>
+                )}
+                <span style={{fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)'}}>
+                  {note.type === 'forgot_password' ? 'PASSWORD RESET REQUEST' : 'NOTIFICATION'}
+                </span>
+                <span style={{fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)', marginLeft:'auto'}}>
+                  {formatTime(note.ts)}
+                </span>
+              </div>
+              <div style={{fontSize:15, color:'var(--chalk)', marginBottom:6}}>{note.message}</div>
+              {note.type === 'forgot_password' && (
+                <div style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'var(--chalk-dim)'}}>
+                  → Go to <strong style={{color:'var(--kelly)'}}>ADMIN → Registered Players</strong> to reset their password.
+                </div>
+              )}
+            </div>
+            <div style={{display:'flex', gap:6, flexShrink:0}}>
+              {!note.read && (
+                <button className="btn btn-ghost btn-sm" style={{fontSize:10}}
+                  onClick={() => markRead(note.id)}>MARK READ</button>
+              )}
+              <button className="btn btn-ghost btn-sm"
+                style={{fontSize:10, color:'var(--red)', borderColor:'rgba(231,76,60,0.3)'}}
+                onClick={() => deleteNote(note.id)}>✕</button>
+            </div>
           </div>
         ))}
       </div>
