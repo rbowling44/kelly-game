@@ -788,8 +788,20 @@ function AdminView({ onRefresh }) {
   const currentRound = DB.currentRound();
   const roundStatuses = DB.roundStatus();
   const games = DB.games().filter(g => g.round === currentRound);
-  const [localScores, setLocalScores] = useState({});
-  const [localSpreads, setLocalSpreads] = useState({});
+  const [localScores, setLocalScores] = useState(() => {
+    const initial = {};
+    DB.games().filter(g => g.round === currentRound).forEach(g => {
+      initial[g.id] = { away: g.awayScore ?? "", home: g.homeScore ?? "" };
+    });
+    return initial;
+  });
+  const [localSpreads, setLocalSpreads] = useState(() => {
+    const initial = {};
+    DB.games().filter(g => g.round === currentRound).forEach(g => {
+      initial[g.id] = g.spread?.toString() ?? "";
+    });
+    return initial;
+  });
   const [newGame, setNewGame] = useState(BLANK_GAME);
   const [showAddGame, setShowAddGame] = useState(false);
 
@@ -999,7 +1011,7 @@ function AdminView({ onRefresh }) {
                 className="admin-score-inputs input"
                 type="number" step="0.5"
                 style={{width:72, background:'rgba(255,255,255,0.05)', border:'1px solid var(--line)', color:'var(--chalk)', padding:'5px 8px', fontFamily:'DM Mono,monospace', fontSize:13, outline:'none'}}
-                defaultValue={game.spread}
+                value={localSpreads[game.id] ?? ""}
                 onChange={e => setSpread(game.id, e.target.value)}
                 onFocus={e => e.target.select()}
               />
@@ -1009,12 +1021,12 @@ function AdminView({ onRefresh }) {
             <div className="admin-score-inputs">
               <div>
                 <div className="admin-score-label">{game.awayTeam.split(' ').pop()}</div>
-                <input type="number" defaultValue={game.awayScore??""} onChange={e=>setScore(game.id,'away',e.target.value)} placeholder="--" />
+                <input type="number" value={localScores[game.id]?.away ?? ""} onChange={e=>setScore(game.id,'away',e.target.value)} placeholder="--" />
               </div>
               <span style={{color:'var(--chalk-dim)',fontFamily:'DM Mono,monospace'}}>—</span>
               <div>
                 <div className="admin-score-label">{game.homeTeam.split(' ').pop()}</div>
-                <input type="number" defaultValue={game.homeScore??""} onChange={e=>setScore(game.id,'home',e.target.value)} placeholder="--" />
+                <input type="number" value={localScores[game.id]?.home ?? ""} onChange={e=>setScore(game.id,'home',e.target.value)} placeholder="--" />
               </div>
             </div>
 
