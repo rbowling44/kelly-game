@@ -302,6 +302,7 @@ export default function App() {
         {!user.is_admin && <button className={`nav-tab ${tab==='picks'?'active':''}`}   onClick={()=>setTab('picks')}>MY PICKS</button>}
         <button                   className={`nav-tab ${tab==='board'?'active':''}`}    onClick={()=>setTab('board')}>LEADERBOARD</button>
         {!user.is_admin && <button className={`nav-tab ${tab==='history'?'active':''}`} onClick={()=>setTab('history')}>HISTORY</button>}
+        {!user.is_admin && <button className={`nav-tab ${tab==='rules'?'active':''}`}   onClick={()=>setTab('rules')}>RULES</button>}
         {user.is_admin  && <button className={`nav-tab ${tab==='admin'?'active':''}`}   onClick={()=>setTab('admin')}>ADMIN</button>}
         {user.is_admin  && <button className={`nav-tab ${tab==='tracker'?'active':''}`} onClick={()=>setTab('tracker')}>ROUND TRACKER</button>}
         {user.is_admin  && <button className={`nav-tab ${tab==='wagers'?'active':''}`}  onClick={()=>setTab('wagers')}>WAGER LOG</button>}
@@ -317,6 +318,7 @@ export default function App() {
         {tab==='picks'         && !user.is_admin && <PicksView         user={user} appData={appData} onUserUpdate={(u)=>{ setUser(u); sessionStorage.setItem('kelly_session',JSON.stringify(u)); }} />}
         {tab==='board'         &&                   <LeaderboardView   currentEmail={user.email} appData={appData} />}
         {tab==='history'       && !user.is_admin && <HistoryView       user={user} />}
+        {tab==='rules'         && !user.is_admin && <RulesView         user={user} appData={appData} />}
         {tab==='admin'         &&  user.is_admin && <AdminView         appData={appData} onRefresh={loadAppData} />}
         {tab==='tracker'       &&  user.is_admin && <RoundTrackerView  appData={appData} />}
         {tab==='wagers'        &&  user.is_admin && <WagerLogView />}
@@ -436,6 +438,17 @@ function PicksView({ user, appData }) {
   if (loading) return <div className="empty-state">Loading games...</div>;
   return (
     <div>
+      {/* Unpaid banner */}
+      {freshUser.paid === false && (
+        <div style={{background:'rgba(231,76,60,0.12)', border:'1px solid rgba(231,76,60,0.4)',
+          padding:'12px 20px', marginBottom:16, display:'flex', alignItems:'center', gap:12}}>
+          <span style={{fontSize:20}}>💳</span>
+          <div style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'#ff8070'}}>
+            <strong style={{fontFamily:'Bebas Neue,sans-serif', fontSize:16, letterSpacing:1, display:'block'}}>ENTRY FEE OUTSTANDING</strong>
+            Your entry fee has not been received yet. Please contact the commissioner to submit payment.
+          </div>
+        </div>
+      )}
       <div className="round-banner">
         <div><div className="round-name">{roundInfo?.name||`Round ${currentRound}`}</div><div className="round-dates">{roundInfo?.dates}</div></div>
         <div className={`round-status status-${roundStatus[currentRound]||'open'}`}>
@@ -454,10 +467,11 @@ function PicksView({ user, appData }) {
           <span style={{fontSize:24}}>⚠️</span>
           <div>
             <div style={{fontFamily:'Bebas Neue,sans-serif', fontSize:20, letterSpacing:2, color:'var(--red)', lineHeight:1}}>
-              50% MINIMUM NOT MET
+              50% MINIMUM NOT MET — FORFEIT WARNING
             </div>
-            <div style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'#ff8070', marginTop:4}}>
-              You must wager at least <strong>{minRequired} pts</strong> this round. Currently wagered: <strong>{totalWagered} pts</strong>. Still need: <strong>{minRequired - totalWagered} more pts</strong>.
+            <div style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'#ff8070', marginTop:4, lineHeight:1.6}}>
+              You must wager at least <strong>{minRequired} pts</strong> this round. Currently wagered: <strong>{totalWagered} pts</strong>. Still need: <strong>{minRequired - totalWagered} more pts</strong>.<br/>
+              <span style={{color:'var(--red)',fontWeight:700}}>If you do not reach the 50% minimum before picks lock, your unwagered balance will be forfeited for this round.</span>
             </div>
           </div>
         </div>
@@ -964,7 +978,13 @@ function AdminPlayers({ appData, onRefresh }) {
     flash(`Password reset for ${u.name}.`);
   };
 
-  const deletePlayer = async (email) => {
+  const togglePaid = async (email) => {
+    const u = players.find(p=>p.email===email);
+    const paid = !u.paid;
+    await DB.upsertUser({...u, paid});
+    setPlayers(prev=>prev.map(p=>p.email===email?{...p,paid}:p));
+    flash(`${u.name} marked as ${paid?'PAID ✓':'UNPAID'}.`);
+  };
     if (!window.confirm(`Delete ${players.find(p=>p.email===email)?.name}? This cannot be undone.`)) return;
     await supabase.from('picks').delete().eq('email', email);
     await supabase.from('users').delete().eq('email', email);
@@ -1007,6 +1027,16 @@ function AdminPlayers({ appData, onRefresh }) {
               <div style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)'}}>{u.email}</div>
             </div>
             <span className="tag tag-open" style={{fontSize:13,padding:'4px 12px'}}>{pts} PTS</span>
+            {/* Paid status */}
+            <button onClick={()=>togglePaid(u.email)} style={{
+              fontFamily:'DM Mono,monospace', fontSize:11, padding:'4px 12px', cursor:'pointer',
+              background: u.paid ? 'rgba(77,189,92,0.15)' : 'rgba(231,76,60,0.15)',
+              border: u.paid ? '1px solid rgba(77,189,92,0.4)' : '1px solid rgba(231,76,60,0.4)',
+              color: u.paid ? 'var(--kelly)' : 'var(--red)',
+              letterSpacing:1
+            }}>
+              {u.paid ? '✓ PAID' : '✕ UNPAID'}
+            </button>
             <div style={{display:'flex',alignItems:'center',gap:6}}>
               <div style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)'}}>PTS OVERRIDE</div>
               <input type="number" min="0" placeholder={pts.toString()}
@@ -1323,6 +1353,130 @@ function NotificationsView({ onRefresh }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// RULES VIEW
+// ============================================================
+function RulesView({ user, appData }) {
+  const { startingPoints } = appData;
+
+  const Rule = ({ num, title, children }) => (
+    <div style={{background:'var(--hardwood)', border:'1px solid var(--line)', marginBottom:12, overflow:'hidden'}}>
+      <div style={{display:'flex', alignItems:'center', gap:16, padding:'14px 20px', borderBottom:'1px solid var(--line)'}}>
+        <span style={{fontFamily:'Bebas Neue,sans-serif', fontSize:36, color:'var(--kelly)', lineHeight:1, minWidth:32}}>{num}</span>
+        <span style={{fontFamily:'Bebas Neue,sans-serif', fontSize:20, letterSpacing:2, color:'var(--chalk)'}}>{title}</span>
+      </div>
+      <div style={{padding:'14px 20px', fontFamily:'DM Mono,monospace', fontSize:12, color:'var(--chalk-dim)', lineHeight:1.8}}>
+        {children}
+      </div>
+    </div>
+  );
+
+  const Highlight = ({ children }) => (
+    <span style={{color:'var(--kelly)', fontWeight:700}}>{children}</span>
+  );
+
+  const Gold = ({ children }) => (
+    <span style={{color:'var(--gold)', fontWeight:700}}>{children}</span>
+  );
+
+  const Red = ({ children }) => (
+    <span style={{color:'var(--red)', fontWeight:700}}>{children}</span>
+  );
+
+  return (
+    <div>
+      <div className="round-banner">
+        <div>
+          <div className="round-name">RULES OF THE KELLY GAME</div>
+          <div className="round-dates">NCAA Tournament · Spread Game</div>
+        </div>
+        {user.paid === false && (
+          <span style={{fontFamily:'DM Mono,monospace',fontSize:11,background:'rgba(231,76,60,0.15)',
+            border:'1px solid rgba(231,76,60,0.4)',color:'var(--red)',padding:'6px 14px'}}>
+            💳 ENTRY FEE OUTSTANDING
+          </span>
+        )}
+        {user.paid === true && (
+          <span style={{fontFamily:'DM Mono,monospace',fontSize:11,background:'rgba(77,189,92,0.15)',
+            border:'1px solid rgba(77,189,92,0.4)',color:'var(--kelly)',padding:'6px 14px'}}>
+            ✓ ENTRY FEE PAID
+          </span>
+        )}
+      </div>
+
+      {/* Quick summary card */}
+      <div style={{background:'rgba(77,189,92,0.06)', border:'1px solid rgba(77,189,92,0.2)',
+        padding:20, marginBottom:24, fontFamily:'DM Mono,monospace', fontSize:12, color:'var(--chalk-dim)', lineHeight:2}}>
+        <div style={{fontFamily:'Bebas Neue,sans-serif', fontSize:18, letterSpacing:2, color:'var(--kelly)', marginBottom:8}}>THE SHORT VERSION</div>
+        You start with <Gold>{startingPoints} points</Gold>. Each round, pick teams against the spread and wager your points. Win a pick → earn points. Lose → lose points.
+        You must wager at least <Red>50% of your points</Red> each round or forfeit the rest.
+        The player with the <Highlight>most points</Highlight> at the end of the tournament wins.
+      </div>
+
+      <Rule num="1" title="STARTING POINTS">
+        Every player starts the tournament with <Gold>{startingPoints} points</Gold>. This is your bankroll for the entire game.
+        There is no buy-in of points between rounds — you play with what you earn.
+      </Rule>
+
+      <Rule num="2" title="HOW ROUNDS WORK">
+        The tournament is played across <Highlight>6 rounds</Highlight>: Round of 64, Round of 32, Sweet 16, Elite Eight, Final Four, and the Championship.
+        Each round has its own set of games with point spreads. You place your wagers at the start of each round and results are tallied once all games are final.
+      </Rule>
+
+      <Rule num="3" title="PICKING AGAINST THE SPREAD">
+        Every game has a <Gold>point spread</Gold>. The favorite must win by more than the spread — the underdog just needs to keep it close (or win outright).<br/><br/>
+        Example: If Duke is <Gold>-8.5</Gold>, Duke must win by 9 or more for "Duke -8.5" to cover.
+        If you picked <Highlight>Vermont +8.5</Highlight>, Vermont just needs to lose by 8 or fewer — or win.
+      </Rule>
+
+      <Rule num="4" title="PLACING WAGERS">
+        You can bet on <Highlight>as many or as few games</Highlight> as you want each round, as long as:
+        <br/>• Your total wagers do <Red>not exceed</Red> your starting points for the round
+        <br/>• You wager at least <Red>50% of your starting points</Red> across all games that round
+        <br/><br/>
+        You choose how to spread your points — go big on a few games, or spread across many. Strategy is everything.
+      </Rule>
+
+      <Rule num="5" title="THE 50% RULE — CRITICAL">
+        <Red style={{fontSize:13}}>You MUST wager at least 50% of your points each round.</Red>
+        <br/><br/>
+        If you start a round with <Gold>200 points</Gold>, you must wager at least <Gold>100 points</Gold> across your picks before the round locks.
+        <br/><br/>
+        <Red>If you fail to meet the 50% minimum, your unwagered balance is forfeited.</Red> The commissioner will manually adjust your total. Don't leave points on the table.
+      </Rule>
+
+      <Rule num="6" title="PICKS LOCK AT TIP-OFF">
+        Once a game tips off, <Red>picks for that game are locked</Red> — no changes allowed. Make sure you get your picks in early.
+        The commissioner can also lock the entire round manually ahead of the first tip.
+      </Rule>
+
+      <Rule num="7" title="WINNING & LOSING POINTS">
+        <Highlight>Win a pick:</Highlight> You earn the amount you wagered (e.g. bet 50 pts, win → +50 pts)<br/>
+        <Red>Lose a pick:</Red> You lose the amount you wagered (e.g. bet 50 pts, lose → -50 pts)<br/>
+        <Gold>Push (exactly on the spread):</Gold> Your wager is returned — no gain, no loss
+      </Rule>
+
+      <Rule num="8" title="BETWEEN ROUNDS">
+        After all games in a round are final, the commissioner settles results and advances to the next round.
+        Your new point total carries forward as your starting balance for the next round.
+        <br/><br/>
+        Check the <Highlight>Leaderboard</Highlight> after each round to see where you stand and plan your strategy.
+      </Rule>
+
+      <Rule num="9" title="WINNING THE KELLY GAME">
+        The player with the <Highlight>most points</Highlight> at the end of the Championship game wins.
+        In the event of a tie, the tiebreaker is the most wins across all rounds.
+      </Rule>
+
+      <Rule num="10" title="COMMISSIONER'S DISCRETION">
+        The commissioner has final say on all disputes, technical issues, and scoring corrections.
+        If you believe a result was scored incorrectly, contact the commissioner directly.
+        Be a good sport — it's all for fun. 🏀
+      </Rule>
     </div>
   );
 }
