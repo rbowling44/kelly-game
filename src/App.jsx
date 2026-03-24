@@ -202,6 +202,7 @@ const DB = {
 
   async getGames(round) { const q = supabase.from('games').select('*'); if(round) q.eq('round',round); const {data}=await q; return data||[]; },
   async upsertGame(g)   { await supabase.from('games').upsert(g); },
+  async updateGame(id, fields) { const {error} = await supabase.from('games').update(fields).eq('id', id); return error; },
   async deleteGame(id)  { await supabase.from('games').delete().eq('id',id); },
 
   async getPicks(email)  { const {data} = await supabase.from('picks').select('*, games(*)').eq('email',email); return data||[]; },
@@ -670,7 +671,7 @@ function AdminView({ appData, onRefresh }) {
     let n=0;
     for (const [id,val] of Object.entries(localSpreads)) {
       if (val==="") continue;
-      await DB.upsertGame({id, spread:parseFloat(val)}); n++;
+      await DB.updateGame(id, { spread: parseFloat(val) }); n++;
     }
     flash(`Updated spreads for ${n} game(s).`); loadGames(adminRound);
   };
@@ -679,7 +680,11 @@ function AdminView({ appData, onRefresh }) {
     let n=0;
     for (const [id,sc] of Object.entries(localScores)) {
       if (sc.away===""||sc.home===""||sc.away==null||sc.home==null) continue;
-      await DB.upsertGame({id, away_score:parseInt(sc.away), home_score:parseInt(sc.home), status:"final"}); n++;
+      await DB.updateGame(id, { away_score: parseInt(sc.away), home_score: parseInt(sc.home), status: "final" }); n++;
+    }
+    if (n === 0) {
+      flash("No scores to save — make sure you've entered scores in both fields.", "error");
+      return;
     }
     flash(`Scores saved for ${n} game(s).`); loadGames(adminRound);
   };
@@ -702,7 +707,7 @@ function AdminView({ appData, onRefresh }) {
 
   const toggleLock = async (game) => {
     const next = game.locked_override===null||game.locked_override===undefined ? true : game.locked_override===true ? false : null;
-    await DB.upsertGame({id:game.id, locked_override:next}); flash("Lock updated."); loadGames(adminRound);
+    await DB.updateGame(game.id, { locked_override: next }); flash("Lock updated."); loadGames(adminRound);
   };
 
   const lockRound = async () => {
