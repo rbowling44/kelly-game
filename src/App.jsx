@@ -303,6 +303,7 @@ export default function App() {
         <button                   className={`nav-tab ${tab==='board'?'active':''}`}    onClick={()=>setTab('board')}>LEADERBOARD</button>
         {!user.is_admin && <button className={`nav-tab ${tab==='history'?'active':''}`} onClick={()=>setTab('history')}>HISTORY</button>}
         {user.is_admin  && <button className={`nav-tab ${tab==='admin'?'active':''}`}   onClick={()=>setTab('admin')}>ADMIN</button>}
+        {user.is_admin  && <button className={`nav-tab ${tab==='tracker'?'active':''}`} onClick={()=>setTab('tracker')}>ROUND TRACKER</button>}
         {user.is_admin  && <button className={`nav-tab ${tab==='wagers'?'active':''}`}  onClick={()=>setTab('wagers')}>WAGER LOG</button>}
         {user.is_admin  && (
           <button className={`nav-tab ${tab==='notifications'?'active':''}`}
@@ -317,6 +318,7 @@ export default function App() {
         {tab==='board'         &&                   <LeaderboardView   currentEmail={user.email} appData={appData} />}
         {tab==='history'       && !user.is_admin && <HistoryView       user={user} />}
         {tab==='admin'         &&  user.is_admin && <AdminView         appData={appData} onRefresh={loadAppData} />}
+        {tab==='tracker'       &&  user.is_admin && <RoundTrackerView  appData={appData} />}
         {tab==='wagers'        &&  user.is_admin && <WagerLogView />}
         {tab==='notifications' &&  user.is_admin && <NotificationsView onRefresh={refreshUnread} />}
       </main>
@@ -446,7 +448,20 @@ function PicksView({ user, appData }) {
         <div className="stat"><span className={`stat-val ${startingPoints-totalWagered>=0?'stat-green':'stat-red'}`}>{startingPoints-totalWagered}</span><span className="stat-label">REMAINING</span></div>
         <div className="stat"><span className={`stat-val ${totalWagered>=minRequired?'stat-green':'stat-red'}`}>{minRequired}</span><span className="stat-label">MIN REQUIRED (50%)</span></div>
       </div>
-      {!roundLocked && totalWagered<minRequired && <div className="bank-warning">⚠ You must wager at least {minRequired} points this round. Currently at {totalWagered}.</div>}
+      {!roundLocked && totalWagered < minRequired && (
+        <div style={{background:'rgba(231,76,60,0.15)', border:'2px solid var(--red)', padding:'14px 20px',
+          marginBottom:16, display:'flex', alignItems:'center', gap:12}}>
+          <span style={{fontSize:24}}>⚠️</span>
+          <div>
+            <div style={{fontFamily:'Bebas Neue,sans-serif', fontSize:20, letterSpacing:2, color:'var(--red)', lineHeight:1}}>
+              50% MINIMUM NOT MET
+            </div>
+            <div style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'#ff8070', marginTop:4}}>
+              You must wager at least <strong>{minRequired} pts</strong> this round. Currently wagered: <strong>{totalWagered} pts</strong>. Still need: <strong>{minRequired - totalWagered} more pts</strong>.
+            </div>
+          </div>
+        </div>
+      )}
       <div className="games-grid">
         {games.length===0 && <div className="empty-state">No games scheduled for this round yet.</div>}
         {games.map(game => {
@@ -832,9 +847,9 @@ function AdminView({ appData, onRefresh }) {
         {showAdd && (
           <div style={{background:'rgba(77,189,92,0.06)',border:'1px solid rgba(77,189,92,0.2)',padding:20,marginBottom:16}}>
             <div style={{display:'grid',gridTemplateColumns:'1fr 60px 1fr 60px',gap:8,marginBottom:8}}>
-              <div className="field" style={{marginBottom:0}}><label>AWAY TEAM</label><input value={newGame.awayTeam} onChange={e=>setNG('awayTeam',e.target.value)} placeholder="Duke" /></div>
+              <div className="field" style={{marginBottom:0}}><label>FAVORITE (away)</label><input value={newGame.awayTeam} onChange={e=>setNG('awayTeam',e.target.value)} placeholder="Duke" /></div>
               <div className="field" style={{marginBottom:0}}><label>SEED</label><input type="number" value={newGame.awaySeed} onChange={e=>setNG('awaySeed',e.target.value)} placeholder="1" /></div>
-              <div className="field" style={{marginBottom:0}}><label>HOME TEAM</label><input value={newGame.homeTeam} onChange={e=>setNG('homeTeam',e.target.value)} placeholder="Vermont" /></div>
+              <div className="field" style={{marginBottom:0}}><label>UNDERDOG (home)</label><input value={newGame.homeTeam} onChange={e=>setNG('homeTeam',e.target.value)} placeholder="Vermont" /></div>
               <div className="field" style={{marginBottom:0}}><label>SEED</label><input type="number" value={newGame.homeSeed} onChange={e=>setNG('homeSeed',e.target.value)} placeholder="16" /></div>
             </div>
             <div style={{display:'grid',gridTemplateColumns:'120px 1fr 1fr 1fr',gap:8,marginBottom:12}}>
@@ -1026,6 +1041,150 @@ function AdminPlayers({ appData, onRefresh }) {
 }
 
 // ============================================================
+// ROUND TRACKER VIEW (admin only)
+// ============================================================
+function RoundTrackerView({ appData }) {
+  const { currentRound, startingPoints: globalSP, roundStatus } = appData;
+  const [players, setPlayers] = useState([]);
+  const [picks,   setPicks]   = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { load(); }, [currentRound]);
+
+  const load = async () => {
+    setLoading(true);
+    const [allUsers, allPicks] = await Promise.all([DB.getAllUsers(), DB.getAllPicks()]);
+    setPlayers(allUsers.filter(u=>!u.is_admin));
+    setPicks(allPicks.filter(p=>p.round===currentRound));
+    setLoading(false);
+  };
+
+  const rsVal = roundStatus[currentRound] || "open";
+  const roundInfo = ROUNDS[currentRound-1];
+
+  const rows = players.map(u => {
+    const startPts   = u.rounds?.[currentRound] ?? globalSP;
+    const myPicks    = picks.filter(p=>p.email===u.email);
+    const wagered    = myPicks.reduce((s,p)=>s+(p.wager||0), 0);
+    const minRequired = Math.ceil(startPts * 0.5);
+    const pct        = startPts > 0 ? Math.round((wagered / startPts) * 100) : 0;
+    const metMin     = wagered >= minRequired;
+    return { name:u.name, email:u.email, startPts, wagered, minRequired, pct, metMin, pickCount:myPicks.length };
+  }).sort((a,b) => b.pct - a.pct);
+
+  const totalNotMet = rows.filter(r=>!r.metMin).length;
+
+  return (
+    <div>
+      <div className="round-banner">
+        <div>
+          <div className="round-name">ROUND TRACKER</div>
+          <div className="round-dates">{roundInfo?.name} · {roundInfo?.dates}</div>
+        </div>
+        <div style={{display:'flex', alignItems:'center', gap:12}}>
+          <div className={`round-status status-${rsVal}`}>
+            {rsVal==='open'?'● PICKS OPEN':rsVal==='locked'?'■ PICKS LOCKED':'✓ COMPLETE'}
+          </div>
+          {totalNotMet > 0 && rsVal === 'open' && (
+            <span style={{fontFamily:'DM Mono,monospace',fontSize:11,background:'rgba(231,76,60,0.15)',
+              border:'1px solid rgba(231,76,60,0.4)',color:'var(--red)',padding:'4px 10px'}}>
+              ⚠ {totalNotMet} player{totalNotMet>1?'s':''} below 50%
+            </span>
+          )}
+        </div>
+      </div>
+
+      {loading && <div className="empty-state">Loading...</div>}
+      {!loading && (
+        <div style={{background:'var(--hardwood)', border:'1px solid var(--line)'}}>
+          {/* Header */}
+          <div style={{display:'grid', gridTemplateColumns:'1fr 90px 90px 90px 90px 120px 80px',
+            padding:'8px 20px', borderBottom:'1px solid var(--line)',
+            fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)', letterSpacing:1}}>
+            <span>PLAYER</span>
+            <span style={{textAlign:'right'}}>START PTS</span>
+            <span style={{textAlign:'right'}}>WAGERED</span>
+            <span style={{textAlign:'right'}}>MIN REQ</span>
+            <span style={{textAlign:'right'}}>REMAINING</span>
+            <span style={{textAlign:'center'}}>% IN ACTION</span>
+            <span style={{textAlign:'right'}}>STATUS</span>
+          </div>
+
+          {rows.length === 0 && <div className="empty-state">No players yet.</div>}
+          {rows.map((row, i) => (
+            <div key={row.email} style={{
+              display:'grid', gridTemplateColumns:'1fr 90px 90px 90px 90px 120px 80px',
+              padding:'14px 20px', borderBottom:'1px solid rgba(255,255,255,0.03)',
+              alignItems:'center',
+              background: !row.metMin && rsVal==='open' ? 'rgba(231,76,60,0.05)' : i%2===0?'transparent':'rgba(255,255,255,0.02)',
+              borderLeft: !row.metMin && rsVal==='open' ? '3px solid var(--red)' : '3px solid transparent'
+            }}>
+              <div>
+                <div style={{fontWeight:600, fontSize:15}}>{row.name}</div>
+                <div style={{fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)'}}>{row.pickCount} pick{row.pickCount!==1?'s':''}</div>
+              </div>
+              <span style={{textAlign:'right', fontFamily:'DM Mono,monospace', fontSize:13, color:'var(--gold)'}}>{row.startPts}</span>
+              <span style={{textAlign:'right', fontFamily:'DM Mono,monospace', fontSize:13, color:'var(--kelly)'}}>{row.wagered}</span>
+              <span style={{textAlign:'right', fontFamily:'DM Mono,monospace', fontSize:13, color:'var(--chalk-dim)'}}>{row.minRequired}</span>
+              <span style={{textAlign:'right', fontFamily:'DM Mono,monospace', fontSize:13,
+                color: row.startPts - row.wagered >= 0 ? 'var(--chalk)' : 'var(--red)'}}>
+                {row.startPts - row.wagered}
+              </span>
+
+              {/* Progress bar */}
+              <div style={{padding:'0 8px'}}>
+                <div style={{display:'flex', alignItems:'center', gap:6}}>
+                  <div style={{flex:1, height:8, background:'rgba(255,255,255,0.08)', borderRadius:4, overflow:'hidden'}}>
+                    <div style={{
+                      height:'100%', borderRadius:4,
+                      width:`${Math.min(row.pct, 100)}%`,
+                      background: row.metMin ? 'var(--kelly)' : row.pct >= 30 ? 'var(--gold)' : 'var(--red)',
+                      transition:'width 0.3s'
+                    }} />
+                  </div>
+                  <span style={{fontFamily:'DM Mono,monospace', fontSize:11,
+                    color: row.metMin ? 'var(--kelly)' : 'var(--red)',
+                    fontWeight: !row.metMin ? 700 : 400,
+                    minWidth:36, textAlign:'right'}}>
+                    {row.pct}%
+                  </span>
+                </div>
+                {/* 50% marker line label */}
+                <div style={{fontFamily:'DM Mono,monospace', fontSize:9, color:'var(--chalk-dim)', textAlign:'center', marginTop:2}}>
+                  50% min
+                </div>
+              </div>
+
+              <div style={{textAlign:'right'}}>
+                {row.metMin
+                  ? <span style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--kelly)',background:'rgba(77,189,92,0.1)',border:'1px solid rgba(77,189,92,0.3)',padding:'3px 8px'}}>✓ MET</span>
+                  : rsVal==='open'
+                    ? <span style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--red)',background:'rgba(231,76,60,0.1)',border:'1px solid rgba(231,76,60,0.3)',padding:'3px 8px',fontWeight:700}}>BELOW</span>
+                    : <span style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)',padding:'3px 8px'}}>—</span>
+                }
+              </div>
+            </div>
+          ))}
+
+          {/* Summary footer */}
+          {rows.length > 0 && (
+            <div style={{padding:'12px 20px', borderTop:'1px solid var(--line)',
+              fontFamily:'DM Mono,monospace', fontSize:11, color:'var(--chalk-dim)',
+              display:'flex', gap:24}}>
+              <span>Total wagered: <strong style={{color:'var(--kelly)'}}>{rows.reduce((s,r)=>s+r.wagered,0)} pts</strong></span>
+              <span>Met 50%: <strong style={{color:'var(--kelly)'}}>{rows.filter(r=>r.metMin).length}/{rows.length}</strong></span>
+              {totalNotMet > 0 && rsVal==='open' && (
+                <span style={{color:'var(--red)'}}>⚠ {totalNotMet} still need to wager more</span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // WAGER LOG
 // ============================================================
 function WagerLogView() {
@@ -1047,10 +1206,17 @@ function WagerLogView() {
     const u    = users.find(u=>u.email===pick.email);
     if (!game||!u) return null;
     const {won,push} = game.status==="final" ? calcResult(game,pick.side) : {won:false,push:false};
+    // Calculate the spread from the picked team's perspective
+    const rawSpread = Number(game.spread);
+    const pickedAway = pick.side === 'away';
+    const pickedSpread = pickedAway ? rawSpread : -rawSpread;
+    const spreadLabel = pickedSpread > 0 ? `+${pickedSpread}` : `${pickedSpread}`;
+    const isUnderdog = pickedSpread > 0;
     return { email:pick.email, name:u.name, round:pick.round,
       game:`${game.away_team} vs ${game.home_team}`,
-      side:pick.side==='away'?game.away_team:game.home_team,
-      spread:game.spread, wager:pick.wager,
+      side:pickedAway?game.away_team:game.home_team,
+      spreadLabel, isUnderdog,
+      wager:pick.wager,
       submittedAt: pick.created_at,
       result:game.status==="final"?(push?'PUSH':won?'WIN':'LOSS'):'PENDING' };
   }).filter(Boolean);
@@ -1099,7 +1265,7 @@ function WagerLogView() {
               <span style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)'}}>{ROUNDS[w.round-1]?.name?.replace('Round of ','R')||`R${w.round}`}</span>
               <span style={{color:'var(--chalk-dim)',fontSize:12,fontFamily:'DM Mono,monospace'}}>{w.game}</span>
               <span style={{color:'var(--kelly)',fontSize:12,fontWeight:600}}>{w.side}</span>
-              <span style={{textAlign:'right',fontFamily:'DM Mono,monospace',fontSize:12,color:'var(--gold)'}}>{w.spread}</span>
+              <span style={{textAlign:'right',fontFamily:'DM Mono,monospace',fontSize:12,color:w.isUnderdog?'#5b9bd5':'var(--gold)',fontWeight:w.isUnderdog?700:400}}>{w.spreadLabel}</span>
               <span style={{textAlign:'right',fontFamily:'DM Mono,monospace',fontSize:13}}>{w.wager}</span>
               <span style={{textAlign:'right',fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)'}}>{formatCT(w.submittedAt)}</span>
               <span style={{textAlign:'right',fontFamily:'DM Mono,monospace',fontSize:11,color:w.result==='WIN'?'var(--green)':w.result==='LOSS'?'var(--red)':w.result==='PUSH'?'var(--gold)':'var(--chalk-dim)'}}>{w.result}</span>
