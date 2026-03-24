@@ -227,6 +227,8 @@ const DB = {
   saveRound: (r) => DB.set('ncaa_round', r),
   roundStatus: () => DB.get('ncaa_round_status') || {},
   saveRoundStatus: (s) => DB.set('ncaa_round_status', s),
+  startingPoints: () => DB.get('ncaa_starting_pts') ?? 100,
+  saveStartingPoints: (n) => DB.set('ncaa_starting_pts', n),
 };
 
 const ROUNDS = [
@@ -240,16 +242,25 @@ const ROUNDS = [
 
 const REGIONS = ["South", "East", "Midwest", "West"];
 
+// Returns true if a game's picks should be locked
+function isGameLocked(game) {
+  if (game.lockedOverride === true) return true;
+  if (game.lockedOverride === false) return false; // admin explicitly unlocked
+  if (game.status === "final") return true;
+  if (!game.tipoff) return false;
+  return new Date() >= new Date(game.tipoff);
+}
+
 // Sample seeded games for demo
 const SAMPLE_GAMES = [
-  { id: "g1r1", round: 1, region: "South", awayTeam: "Auburn", awaySeed: 1, homeTeam: "Alabama St.", homeSeed: 16, spread: -28.5, status: "open", awayScore: null, homeScore: null, gameTime: "12:15 PM ET Thu" },
-  { id: "g2r1", round: 1, region: "South", awayTeam: "Michigan St.", awaySeed: 8, homeTeam: "Mississippi", homeSeed: 9, spread: -1.5, status: "open", awayScore: null, homeScore: null, gameTime: "2:45 PM ET Thu" },
-  { id: "g3r1", round: 1, region: "East", awayTeam: "Duke", awaySeed: 1, homeTeam: "Mount St. Mary's", homeSeed: 16, spread: -25.5, status: "open", awayScore: null, homeScore: null, gameTime: "7:10 PM ET Thu" },
-  { id: "g4r1", round: 1, region: "East", awayTeam: "Missouri", awaySeed: 8, homeTeam: "Drake", homeSeed: 9, spread: -2.5, status: "open", awayScore: null, homeScore: null, gameTime: "9:40 PM ET Thu" },
-  { id: "g5r1", round: 1, region: "Midwest", awayTeam: "Houston", awaySeed: 1, homeTeam: "SIU Edwardsville", homeSeed: 16, spread: -30.5, status: "open", awayScore: null, homeScore: null, gameTime: "12:15 PM ET Fri" },
-  { id: "g6r1", round: 1, region: "Midwest", awayTeam: "Gonzaga", awaySeed: 4, homeTeam: "Georgia", homeSeed: 13, spread: -8.5, status: "open", awayScore: null, homeScore: null, gameTime: "2:45 PM ET Fri" },
-  { id: "g7r1", round: 1, region: "West", awayTeam: "Florida", awaySeed: 1, homeTeam: "Norfolk St.", homeSeed: 16, spread: -27.5, status: "open", awayScore: null, homeScore: null, gameTime: "7:10 PM ET Fri" },
-  { id: "g8r1", round: 1, region: "West", awayTeam: "UConn", awaySeed: 2, homeTeam: "Oklahoma", homeSeed: 15, spread: -14.5, status: "open", awayScore: null, homeScore: null, gameTime: "9:40 PM ET Fri" },
+  { id: "g1r1", round: 1, region: "South", awayTeam: "Auburn", awaySeed: 1, homeTeam: "Alabama St.", homeSeed: 16, spread: -28.5, status: "open", awayScore: null, homeScore: null, gameTime: "12:15 PM ET Thu", tipoff: "2026-03-19T12:15:00-04:00", lockedOverride: null },
+  { id: "g2r1", round: 1, region: "South", awayTeam: "Michigan St.", awaySeed: 8, homeTeam: "Mississippi", homeSeed: 9, spread: -1.5, status: "open", awayScore: null, homeScore: null, gameTime: "2:45 PM ET Thu", tipoff: "2026-03-19T14:45:00-04:00", lockedOverride: null },
+  { id: "g3r1", round: 1, region: "East", awayTeam: "Duke", awaySeed: 1, homeTeam: "Mount St. Mary's", homeSeed: 16, spread: -25.5, status: "open", awayScore: null, homeScore: null, gameTime: "7:10 PM ET Thu", tipoff: "2026-03-19T19:10:00-04:00", lockedOverride: null },
+  { id: "g4r1", round: 1, region: "East", awayTeam: "Missouri", awaySeed: 8, homeTeam: "Drake", homeSeed: 9, spread: -2.5, status: "open", awayScore: null, homeScore: null, gameTime: "9:40 PM ET Thu", tipoff: "2026-03-19T21:40:00-04:00", lockedOverride: null },
+  { id: "g5r1", round: 1, region: "Midwest", awayTeam: "Houston", awaySeed: 1, homeTeam: "SIU Edwardsville", homeSeed: 16, spread: -30.5, status: "open", awayScore: null, homeScore: null, gameTime: "12:15 PM ET Fri", tipoff: "2026-03-20T12:15:00-04:00", lockedOverride: null },
+  { id: "g6r1", round: 1, region: "Midwest", awayTeam: "Gonzaga", awaySeed: 4, homeTeam: "Georgia", homeSeed: 13, spread: -8.5, status: "open", awayScore: null, homeScore: null, gameTime: "2:45 PM ET Fri", tipoff: "2026-03-20T14:45:00-04:00", lockedOverride: null },
+  { id: "g7r1", round: 1, region: "West", awayTeam: "Florida", awaySeed: 1, homeTeam: "Norfolk St.", homeSeed: 16, spread: -27.5, status: "open", awayScore: null, homeScore: null, gameTime: "7:10 PM ET Fri", tipoff: "2026-03-20T19:10:00-04:00", lockedOverride: null },
+  { id: "g8r1", round: 1, region: "West", awayTeam: "UConn", awaySeed: 2, homeTeam: "Oklahoma", homeSeed: 15, spread: -14.5, status: "open", awayScore: null, homeScore: null, gameTime: "9:40 PM ET Fri", tipoff: "2026-03-20T21:40:00-04:00", lockedOverride: null },
 ];
 
 function initData() {
@@ -261,7 +272,8 @@ function initData() {
     DB.saveGames(SAMPLE_GAMES);
     DB.saveRound(1);
     DB.saveRoundStatus({ 1: "open" });
-    DB.set('ncaa_initialized', true);
+    DB.saveStartingPoints(100);
+    DB.set('ncaa_initialized_v2', true);
   }
 }
 
@@ -353,7 +365,8 @@ function AuthScreen({ onLogin }) {
       if (!name) return setError("Name required.");
       if (users[email.toLowerCase()]) return setError("Email already registered.");
       const currentRound = DB.currentRound();
-      const newUser = { email: email.toLowerCase(), password: btoa(password), name, isAdmin: false, rounds: { [currentRound]: 100 }, history: [] };
+      const sp = DB.startingPoints();
+      const newUser = { email: email.toLowerCase(), password: btoa(password), name, isAdmin: false, rounds: { [currentRound]: sp }, history: [] };
       users[email.toLowerCase()] = newUser;
       DB.saveUsers(users);
       onLogin(newUser);
@@ -412,7 +425,7 @@ function PicksView({ user, onRefresh }) {
     .reduce((s, p) => s + (p.wager || 0), 0);
 
   const minRequired = Math.ceil(startingPoints * 0.5);
-  const locked = roundStatus === "locked" || roundStatus === "complete";
+  const roundLocked = roundStatus === "locked" || roundStatus === "complete";
 
   const savePick = (gameId, side, wager) => {
     const allP = DB.picks();
@@ -452,7 +465,7 @@ function PicksView({ user, onRefresh }) {
         <div className="stat"><span className={`stat-val ${totalWagered >= minRequired ? 'stat-green' : 'stat-red'}`}>{minRequired}</span><span className="stat-label">MIN REQUIRED (50%)</span></div>
       </div>
 
-      {!locked && totalWagered < minRequired && (
+      {!roundLocked && totalWagered < minRequired && (
         <div className="bank-warning">⚠ You must wager at least {minRequired} points this round. Currently at {totalWagered}.</div>
       )}
 
@@ -463,7 +476,8 @@ function PicksView({ user, onRefresh }) {
             key={game.id}
             game={game}
             myPick={myPicks[game.id]}
-            locked={locked}
+            locked={roundLocked || isGameLocked(game)}
+            gameLocked={isGameLocked(game)}
             startingPoints={startingPoints}
             totalWagered={totalWagered}
             onPick={savePick}
@@ -475,7 +489,7 @@ function PicksView({ user, onRefresh }) {
   );
 }
 
-function GameCard({ game, myPick, locked, startingPoints, totalWagered, onPick, onClear }) {
+function GameCard({ game, myPick, locked, gameLocked, startingPoints, totalWagered, onPick, onClear }) {
   const [localSide, setLocalSide] = useState(myPick?.side || null);
   const [localWager, setLocalWager] = useState(myPick?.wager?.toString() || "");
 
@@ -489,9 +503,28 @@ function GameCard({ game, myPick, locked, startingPoints, totalWagered, onPick, 
     setLocalSide(side);
   };
 
+  // Points already committed to OTHER games this round (not this game)
+  const otherWagered = totalWagered - (myPick?.wager || 0);
+  const availablePoints = startingPoints - otherWagered;
+
   const commitPick = () => {
     if (!localSide || !localWager || parseInt(localWager) <= 0) return;
+    const wager = parseInt(localWager);
+    if (wager > availablePoints) {
+      alert(`You only have ${availablePoints} points available to wager on this game.`);
+      return;
+    }
+    if (wager < 1) return;
     onPick(game.id, localSide, localWager);
+  };
+
+  const handleWagerChange = (e) => {
+    const val = e.target.value;
+    if (parseInt(val) > availablePoints) {
+      setLocalWager(availablePoints.toString());
+    } else {
+      setLocalWager(val);
+    }
   };
 
   const spreadDisplay = game.spread > 0 ? `+${game.spread}` : `${game.spread}`;
@@ -550,9 +583,9 @@ function GameCard({ game, myPick, locked, startingPoints, totalWagered, onPick, 
             {localSide && (
               <>
                 <div>
-                  <div className="wager-label">WAGER</div>
-                  <input className="wager-input" type="number" min="1" max={startingPoints} value={localWager}
-                    onChange={e=>setLocalWager(e.target.value)} placeholder="pts" />
+                  <div className="wager-label">WAGER <span style={{color:'var(--chalk-dim)'}}>/ {availablePoints} avail</span></div>
+                  <input className="wager-input" type="number" min="1" max={availablePoints} value={localWager}
+                    onChange={handleWagerChange} placeholder="pts" />
                 </div>
                 {myPick ? (
                   <button className="btn btn-sm" style={{background:'var(--red)',color:'#fff',cursor:'default',opacity:0.9}}>
@@ -567,12 +600,17 @@ function GameCard({ game, myPick, locked, startingPoints, totalWagered, onPick, 
           </>
         ) : (
           <>
+            {gameLocked && game.status !== "final" && (
+              <span style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'var(--red)', background:'rgba(231,76,60,0.1)', border:'1px solid rgba(231,76,60,0.3)', padding:'5px 12px', letterSpacing:1}}>
+                🔒 GAME IN PROGRESS — PICKS CLOSED
+              </span>
+            )}
             {myPick ? (
               <span style={{fontSize:14,color:'var(--chalk)'}}>
                 Picked: <strong>{myPick.side === 'away' ? game.awayTeam : game.homeTeam}</strong> for <strong>{myPick.wager} pts</strong>
               </span>
             ) : (
-              <span style={{fontSize:13,color:'var(--chalk-dim)',fontFamily:'DM Mono,monospace'}}>No pick submitted</span>
+              !gameLocked && <span style={{fontSize:13,color:'var(--chalk-dim)',fontFamily:'DM Mono,monospace'}}>No pick submitted</span>
             )}
             {resultEl}
           </>
@@ -742,7 +780,7 @@ function HistoryView({ user }) {
 // ============================================================
 // ADMIN VIEW
 // ============================================================
-const BLANK_GAME = { awayTeam:'', awaySeed:'', homeTeam:'', homeSeed:'', spread:'', region:'South', gameTime:'' };
+const BLANK_GAME = { awayTeam:'', awaySeed:'', homeTeam:'', homeSeed:'', spread:'', region:'South', gameTime:'', tipoff:'', lockedOverride: null };
 
 function AdminView({ onRefresh }) {
   const [msg, setMsg] = useState("");
@@ -785,13 +823,13 @@ function AdminView({ onRefresh }) {
   };
 
   const addGame = () => {
-    const { awayTeam, awaySeed, homeTeam, homeSeed, spread, region, gameTime } = newGame;
+    const { awayTeam, awaySeed, homeTeam, homeSeed, spread, region, gameTime, tipoff } = newGame;
     if (!awayTeam || !homeTeam || spread === "") return flash("Fill in both teams and a spread.", "error");
     const allGames = DB.games();
     const id = `g${Date.now()}`;
     allGames.push({ id, round: currentRound, region, awayTeam, awaySeed: parseInt(awaySeed)||0,
       homeTeam, homeSeed: parseInt(homeSeed)||0, spread: parseFloat(spread), status: "open",
-      awayScore: null, homeScore: null, gameTime });
+      awayScore: null, homeScore: null, gameTime, tipoff: tipoff || null, lockedOverride: null });
     DB.saveGames(allGames);
     setNewGame(BLANK_GAME);
     setShowAddGame(false);
@@ -857,11 +895,21 @@ function AdminView({ onRefresh }) {
     s[nextRound] = "open";
     DB.saveRoundStatus(s);
     DB.saveRound(nextRound);
-    flash(`Advanced to ${ROUNDS[nextRound-1]?.name}! Point totals updated for all players.`);
-    onRefresh();
+    flash(`Advanced to ${ROUNDS[nextRound-1]?.name}! Point totals updated for all players.`);    onRefresh();
   };
 
-  const setScore = (gid, side, val) => setLocalScores(prev => ({ ...prev, [gid]: { ...prev[gid], [side]: val } }));
+  const toggleGameLock = (gid) => {
+    const allGames = DB.games();
+    const g = allGames.find(x => x.id === gid);
+    if (!g) return;
+    // Cycle: null (auto) → true (force locked) → false (force unlocked) → null
+    if (g.lockedOverride === null || g.lockedOverride === undefined) g.lockedOverride = true;
+    else if (g.lockedOverride === true) g.lockedOverride = false;
+    else g.lockedOverride = null;
+    DB.saveGames(allGames);
+    flash(`Game lock updated.`);
+    onRefresh();
+  };
   const setSpread = (gid, val) => setLocalSpreads(prev => ({ ...prev, [gid]: val }));
   const setNG = (k, v) => setNewGame(prev => ({ ...prev, [k]: v }));
 
@@ -911,7 +959,7 @@ function AdminView({ onRefresh }) {
                 <input type="number" value={newGame.homeSeed} onChange={e=>setNG('homeSeed',e.target.value)} placeholder="16" />
               </div>
             </div>
-            <div style={{display:'grid', gridTemplateColumns:'120px 1fr 1fr', gap:8, marginBottom:12}}>
+            <div style={{display:'grid', gridTemplateColumns:'120px 1fr 1fr 1fr', gap:8, marginBottom:12}}>
               <div className="field" style={{marginBottom:0}}>
                 <label>SPREAD (away)</label>
                 <input type="number" step="0.5" value={newGame.spread} onChange={e=>setNG('spread',e.target.value)} placeholder="-7.5" />
@@ -923,8 +971,12 @@ function AdminView({ onRefresh }) {
                 </select>
               </div>
               <div className="field" style={{marginBottom:0}}>
-                <label>GAME TIME</label>
+                <label>DISPLAY TIME</label>
                 <input value={newGame.gameTime} onChange={e=>setNG('gameTime',e.target.value)} placeholder="12:15 PM ET Thu" />
+              </div>
+              <div className="field" style={{marginBottom:0}}>
+                <label>TIP-OFF DATE+TIME</label>
+                <input type="datetime-local" value={newGame.tipoff} onChange={e=>setNG('tipoff',e.target.value)} />
               </div>
             </div>
             <button className="btn btn-green btn-sm" onClick={addGame}>✓ ADD GAME TO ROUND {currentRound}</button>
@@ -968,6 +1020,18 @@ function AdminView({ onRefresh }) {
 
             <div style={{display:'flex', gap:6, marginLeft:'auto', alignItems:'center'}}>
               {game.status === "final" && <span className="tag tag-final">FINAL</span>}
+              {/* Lock override toggle */}
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{
+                  fontSize:11,
+                  color: game.lockedOverride === true ? 'var(--red)' : game.lockedOverride === false ? 'var(--green)' : isGameLocked(game) ? 'var(--red)' : 'var(--chalk-dim)',
+                  borderColor: game.lockedOverride === true ? 'rgba(231,76,60,0.4)' : game.lockedOverride === false ? 'rgba(46,204,113,0.4)' : 'var(--line)'
+                }}
+                title="Click to cycle: Auto → Force Locked → Force Open"
+                onClick={() => toggleGameLock(game.id)}>
+                {game.lockedOverride === true ? '🔒 FORCED LOCK' : game.lockedOverride === false ? '🔓 FORCED OPEN' : isGameLocked(game) ? '🔒 AUTO-LOCKED' : '🟢 AUTO-OPEN'}
+              </button>
               <button className="btn btn-ghost btn-sm" style={{color:'var(--red)',borderColor:'rgba(231,76,60,0.3)',fontSize:11}}
                 onClick={()=>deleteGame(game.id)}>✕</button>
             </div>
@@ -1008,7 +1072,7 @@ function AdminView({ onRefresh }) {
       <div className="divider" />
 
       {/* ── PLAYERS ── */}
-      <AdminPlayers />
+      <AdminPlayers onRefresh={onRefresh} />
     </div>
   );
 }
@@ -1016,22 +1080,89 @@ function AdminView({ onRefresh }) {
 
 
 
-function AdminPlayers() {
-  const users = DB.users();
+function AdminPlayers({ onRefresh }) {
   const currentRound = DB.currentRound();
-  const playerList = Object.values(users).filter(u=>!u.isAdmin);
+  const [playerList, setPlayerList] = useState(Object.values(DB.users()).filter(u=>!u.isAdmin));
+  const [editPts, setEditPts] = useState({});
+  const [startPts, setStartPts] = useState(DB.startingPoints().toString());
+  const [msg, setMsg] = useState("");
+
+  const flash = (t) => { setMsg(t); setTimeout(()=>setMsg(""), 2500); };
+
+  const saveStartingPoints = () => {
+    const val = parseInt(startPts);
+    if (!val || val < 1) return flash("Enter a valid number.");
+    DB.saveStartingPoints(val);
+    flash(`Starting points set to ${val}. New players will receive ${val} pts when they join.`);
+  };
+
+  const overridePoints = (email) => {
+    const val = parseInt(editPts[email]);
+    if (isNaN(val) || val < 0) return flash("Enter a valid point value.");
+    const users = DB.users();
+    users[email].rounds = users[email].rounds || {};
+    users[email].rounds[currentRound] = val;
+    DB.saveUsers(users);
+    setPlayerList(Object.values(DB.users()).filter(u=>!u.isAdmin));
+    flash(`Updated ${users[email].name} to ${val} pts.`);
+    if (onRefresh) onRefresh();
+  };
 
   return (
     <div className="admin-section">
-      <div className="admin-title">REGISTERED PLAYERS ({playerList.length})</div>
-      {playerList.map(u => (
-        <div key={u.email} className="admin-game-row">
-          <div className="admin-game-teams">{u.name}</div>
-          <span style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)'}}>{u.email}</span>
-          <span className="tag tag-open" style={{marginLeft:'auto'}}>{u.rounds?.[currentRound] ?? 0} PTS</span>
+      {/* ── Global Starting Points ── */}
+      <div className="admin-title">GAME SETTINGS</div>
+      {msg && <div className="success-msg" style={{marginBottom:12}}>{msg}</div>}
+      <div style={{background:'rgba(77,189,92,0.05)', border:'1px solid rgba(77,189,92,0.15)', padding:16, marginBottom:24}}>
+        <div style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'var(--chalk-dim)', letterSpacing:1, marginBottom:8}}>STARTING POINTS PER ROUND</div>
+        <div style={{display:'flex', alignItems:'center', gap:10}}>
+          <input
+            type="number" min="1"
+            style={{background:'rgba(255,255,255,0.05)', border:'1px solid var(--line)', color:'var(--chalk)', padding:'8px 12px', fontFamily:'DM Mono,monospace', fontSize:18, width:120, outline:'none'}}
+            value={startPts}
+            onChange={e=>setStartPts(e.target.value)}
+          />
+          <button className="btn btn-orange btn-sm" onClick={saveStartingPoints}>SAVE</button>
+          <span style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'var(--chalk-dim)'}}>
+            Currently: <strong style={{color:'var(--gold)'}}>{DB.startingPoints()} pts</strong> · Applied to new players &amp; new rounds
+          </span>
         </div>
-      ))}
+      </div>
+
+      {/* ── Player List with Override ── */}
+      <div className="admin-title">REGISTERED PLAYERS ({playerList.length})</div>
       {playerList.length === 0 && <div className="empty-state">No players registered yet.</div>}
+      {playerList.map(u => {
+        const pts = u.rounds?.[currentRound] ?? 0;
+        return (
+          <div key={u.email} className="admin-game-row" style={{flexWrap:'wrap', gap:10, alignItems:'center'}}>
+            <div style={{flex:1, minWidth:140}}>
+              <div style={{fontWeight:600, fontSize:15}}>{u.name}</div>
+              <div style={{fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)'}}>{u.email}</div>
+            </div>
+            <span className="tag tag-open" style={{fontSize:13, padding:'4px 12px'}}>
+              {pts} PTS
+            </span>
+            {/* Point override */}
+            <div style={{display:'flex', alignItems:'center', gap:6}}>
+              <div style={{fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)'}}>OVERRIDE</div>
+              <input
+                type="number" min="0"
+                placeholder={pts.toString()}
+                style={{background:'rgba(255,255,255,0.05)', border:'1px solid var(--line)', color:'var(--chalk)', padding:'5px 10px', fontFamily:'DM Mono,monospace', fontSize:13, width:80, outline:'none'}}
+                value={editPts[u.email] ?? ""}
+                onChange={e => setEditPts(prev => ({...prev, [u.email]: e.target.value}))}
+              />
+              <button
+                className="btn btn-orange btn-sm"
+                style={{opacity: editPts[u.email] !== undefined && editPts[u.email] !== "" ? 1 : 0.4}}
+                onClick={() => overridePoints(u.email)}>
+                SET
+              </button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
