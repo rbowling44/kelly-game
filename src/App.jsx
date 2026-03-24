@@ -215,6 +215,20 @@ const DB = {
   async updateNotification(id,u) { await supabase.from('notifications').update(u).eq('id',id); },
   async deleteNotification(id)   { await supabase.from('notifications').delete().eq('id',id); },
   async clearNotifications()     { await supabase.from('notifications').delete().neq('id',0); },
+  async resetAllGameData()       {
+    // Wipe picks, games, reset all player points/history, reset round to 1
+    await supabase.from('picks').delete().neq('id', 0);
+    await supabase.from('games').delete().neq('id', 'x');
+    await supabase.from('notifications').delete().neq('id', 0);
+    const { data: users } = await supabase.from('users').select('*');
+    const sp = parseInt((await supabase.from('settings').select('value').eq('key','starting_points').single()).data?.value) || 100;
+    for (const u of (users||[])) {
+      if (u.is_admin) continue;
+      await supabase.from('users').update({ rounds: { 1: sp }, history: [] }).eq('email', u.email);
+    }
+    await supabase.from('settings').upsert({ key: 'current_round', value: '1' });
+    await supabase.from('settings').upsert({ key: 'round_status', value: { 1: 'open' } });
+  },
 };
 
 // ============================================================
@@ -232,7 +246,18 @@ export default function App() {
     style.textContent = STYLES;
     document.head.appendChild(style);
     const saved = sessionStorage.getItem('kelly_session');
-    if (saved) setUser(JSON.parse(saved));
+    if (saved) {
+      const savedUser = JSON.parse(saved);
+      // Always re-fetch fresh user data from DB to avoid stale points
+      DB.getUser(savedUser.email).then(freshUser => {
+        if (freshUser) {
+          setUser(freshUser);
+          sessionStorage.setItem('kelly_session', JSON.stringify(freshUser));
+        } else {
+          setUser(savedUser);
+        }
+      });
+    }
     loadAppData();
     return () => document.head.removeChild(style);
   }, []);
@@ -250,8 +275,12 @@ export default function App() {
 
   useEffect(() => { if (user?.is_admin) refreshUnread(); }, [user]);
 
-  const login  = (u) => { setUser(u); sessionStorage.setItem('kelly_session', JSON.stringify(u)); if(u.is_admin) refreshUnread(); };
-  const logout = ()  => { setUser(null); sessionStorage.removeItem('kelly_session'); setTab("picks"); };
+  const login = (u) => {
+    setUser(u);
+    sessionStorage.setItem('kelly_session', JSON.stringify(u));
+    if (u.is_admin) refreshUnread();
+  };
+  const logout = () => { setUser(null); sessionStorage.removeItem('kelly_session'); setTab("picks"); };
 
   if (loading) return <div className="loading"><span className="spinner"/>LOADING THE KELLY GAME...</div>;
   if (!user)   return <AuthScreen onLogin={login} />;
@@ -368,18 +397,28 @@ function AuthScreen({ onLogin }) {
 // ============================================================
 function PicksView({ user, appData }) {
   const { currentRound, startingPoints: globalSP, roundStatus } = appData;
-  const [games, setGames]   = useState([]);
-  const [picks, setPicks]   = useState([]);
-  const [loading, setLoading] = useState(true);
-  const startingPoints = user.rounds?.[currentRound] ?? globalSP;
-  const roundLocked    = roundStatus[currentRound] === "locked" || roundStatus[currentRound] === "complete";
+  const [games, setGames]         = useState([]);
+  const [picks, setPicks]         = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [freshUser, setFreshUser] = useState(user);
+  const roundLocked = roundStatus[currentRound] === "locked" || roundStatus[currentRound] === "complete";
+
+  // Always pull fresh user from DB so points are never stale after a round advance
+  const startingPoints = freshUser.rounds?.[currentRound] ?? globalSP;
 
   useEffect(() => { load(); }, [currentRound]);
 
   const load = async () => {
     setLoading(true);
-    const [g, p] = await Promise.all([DB.getGames(currentRound), DB.getPicks(user.email)]);
-    setGames(g); setPicks(p.filter(x=>x.round===currentRound)); setLoading(false);
+    const [g, p, u] = await Promise.all([
+      DB.getGames(currentRound),
+      DB.getPicks(user.email),
+      DB.getUser(user.email),
+    ]);
+    setGames(g);
+    setPicks(p.filter(x=>x.round===currentRound));
+    if (u) { setFreshUser(u); sessionStorage.setItem('kelly_session', JSON.stringify(u)); }
+    setLoading(false);
   };
 
   const totalWagered = picks.reduce((s,p)=>s+(p.wager||0), 0);
@@ -613,7 +652,9 @@ function HistoryView({ user }) {
             } else badge = <span className="pick-result result-pending">PENDING</span>;
             return (
               <div key={pick.id} className="history-pick">
-                <span className="history-game">{game.away_team} vs {game.home_team}</span>
+                <span className="history-game">{game.away_team} vs {game.home_team}
+                  {game.status==="final" && <span style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)',marginLeft:8}}>{game.away_score}–{game.home_score}</span>}
+                </span>
                 <span className="history-pick-team">▶ {team} <span style={{color:'var(--gold)',fontFamily:'DM Mono,monospace',fontSize:11}}>{spreadLabel}</span></span>
                 <span className="history-wager">{pick.wager} pts</span>
                 {badge}
@@ -908,12 +949,29 @@ function AdminPlayers({ appData, onRefresh }) {
     flash(`Password reset for ${u.name}.`);
   };
 
+  const deletePlayer = async (email) => {
+    if (!window.confirm(`Delete ${players.find(p=>p.email===email)?.name}? This cannot be undone.`)) return;
+    await supabase.from('picks').delete().eq('email', email);
+    await supabase.from('users').delete().eq('email', email);
+    setPlayers(prev => prev.filter(p => p.email !== email));
+    flash("Player deleted.");
+  };
+
+  const resetAllData = async () => {
+    if (!window.confirm("⚠️ RESET ALL DATA?\n\nThis will:\n• Delete ALL picks\n• Delete ALL games\n• Reset ALL player points to starting value\n• Reset to Round 1\n\nThis cannot be undone. Are you sure?")) return;
+    flash("Resetting... please wait.");
+    await DB.resetAllGameData();
+    setPlayers(prev => prev.map(p => ({...p, rounds: {1: globalSP}, history: []})));
+    flash("✓ All data reset. Game is back to Round 1 with fresh point totals.");
+    onRefresh();
+  };
+
   return (
     <div className="admin-section">
       <div className="admin-title">GAME SETTINGS</div>
       {msg && <div className="success-msg" style={{marginBottom:12}}>{msg}</div>}
       <div style={{background:'rgba(77,189,92,0.05)',border:'1px solid rgba(77,189,92,0.15)',padding:16,marginBottom:24}}>
-        <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)',letterSpacing:1,marginBottom:8}}>STARTING POINTS PER ROUND</div>
+        <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)',letterSpacing:1,marginBottom:8}}>STARTING POINTS FOR THE GAME</div>
         <div style={{display:'flex',alignItems:'center',gap:10}}>
           <input type="number" min="1"
             style={{background:'rgba(255,255,255,0.05)',border:'1px solid var(--line)',color:'var(--chalk)',padding:'8px 12px',fontFamily:'DM Mono,monospace',fontSize:18,width:120,outline:'none'}}
@@ -948,9 +1006,21 @@ function AdminPlayers({ appData, onRefresh }) {
                 value={editPwd[u.email]??""} onChange={e=>setEditPwd(prev=>({...prev,[u.email]:e.target.value}))} />
               <button className="btn btn-ghost btn-sm" style={{opacity:editPwd[u.email]?1:0.4,fontSize:11}} onClick={()=>resetPassword(u.email)}>RESET</button>
             </div>
+            <button className="btn btn-ghost btn-sm" style={{color:'var(--red)',borderColor:'rgba(231,76,60,0.3)',fontSize:11,marginLeft:'auto'}} onClick={()=>deletePlayer(u.email)}>✕ DELETE</button>
           </div>
         );
       })}
+
+      {/* ── Danger Zone ── */}
+      <div className="divider" />
+      <div style={{background:'rgba(231,76,60,0.05)',border:'1px solid rgba(231,76,60,0.2)',padding:20,marginTop:8}}>
+        <div style={{fontFamily:'Bebas Neue,sans-serif',fontSize:20,letterSpacing:2,color:'var(--red)',marginBottom:8}}>DANGER ZONE</div>
+        <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)',marginBottom:14,lineHeight:1.6}}>
+          Wipe all picks, games, notifications, and reset player points before a real game or fresh test run.
+          Player accounts are kept. Points reset to current starting value. Round resets to 1.
+        </div>
+        <button className="btn btn-red" onClick={resetAllData}>🗑 RESET ALL PICKS, GAMES &amp; POINTS</button>
+      </div>
     </div>
   );
 }
