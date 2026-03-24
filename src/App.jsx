@@ -922,6 +922,7 @@ function AdminView({ onRefresh }) {
     flash(`Game lock updated.`);
     onRefresh();
   };
+  const setScore = (gid, side, val) => setLocalScores(prev => ({ ...prev, [gid]: { ...prev[gid], [side]: val } }));
   const setSpread = (gid, val) => setLocalSpreads(prev => ({ ...prev, [gid]: val }));
   const setNG = (k, v) => setNewGame(prev => ({ ...prev, [k]: v }));
 
