@@ -272,6 +272,16 @@ export default function App() {
   const loadAppData = async () => {
     const [cr, sp, rs, tc] = await Promise.all([DB.currentRound(), DB.startingPoints(), DB.roundStatus(), DB.getSetting('tournament_complete')]);
     setAppData({ currentRound:cr, startingPoints:sp, roundStatus:rs, tournamentComplete: tc === 'true' });
+    // Also refresh current user from DB so points are always fresh
+    const saved = sessionStorage.getItem('kelly_session');
+    if (saved) {
+      const savedUser = JSON.parse(saved);
+      const freshUser = await DB.getUser(savedUser.email);
+      if (freshUser) {
+        setUser(freshUser);
+        sessionStorage.setItem('kelly_session', JSON.stringify(freshUser));
+      }
+    }
     setLoading(false);
   };
 
@@ -801,7 +811,21 @@ function AdminView({ appData, onRefresh }) {
     const rs = await reloadRoundStatus();
     if (!rs[rNum]) rs[rNum]="open";
     await Promise.all([DB.setSetting('current_round',rNum.toString()), DB.setSetting('round_status',rs)]);
-    setAdminRound(rNum); setRoundStatus({...rs}); flash(`Active round set to ${ROUNDS[rNum-1]?.name}.`); onRefresh();
+
+    // Seed all players with starting points for this round if they don't have an entry yet
+    const [allUsers, sp] = await Promise.all([DB.getAllUsers(), DB.startingPoints()]);
+    for (const u of allUsers) {
+      if (u.is_admin) continue;
+      if (u.rounds?.[rNum] === undefined || u.rounds?.[rNum] === null) {
+        const rounds = { ...(u.rounds || {}), [rNum]: sp };
+        await DB.updateUser(u.email, { rounds });
+      }
+    }
+
+    setAdminRound(rNum);
+    setRoundStatus({...rs});
+    flash(`Active round set to ${ROUNDS[rNum-1]?.name}. All players seeded with ${sp} pts.`);
+    onRefresh();
   };
 
   const saveSpreads = async () => {
