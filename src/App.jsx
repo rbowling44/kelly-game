@@ -294,7 +294,9 @@ export default function App() {
   // Use freshUser points from DB if available via session
   const savedSession = sessionStorage.getItem('kelly_session');
   const liveUser = savedSession ? JSON.parse(savedSession) : user;
-  const pts = liveUser.rounds?.[appData.currentRound] ?? 0;
+  const startPts = liveUser.rounds?.[appData.currentRound] ?? 0;
+  const [liveWagered, setLiveWagered] = useState(0);
+  const pts = Math.max(0, startPts - liveWagered);
 
   return (
     <div className="app">
@@ -315,14 +317,14 @@ export default function App() {
         </div>
       </header>
       <nav className="nav">
-        {!user.is_admin && <button className={`nav-tab ${tab==='picks'?'active':''}`}   onClick={()=>setTab('picks')}>MY PICKS</button>}
-        <button                   className={`nav-tab ${tab==='board'?'active':''}`}    onClick={()=>setTab('board')}>LEADERBOARD</button>
-        {!user.is_admin && <button className={`nav-tab ${tab==='history'?'active':''}`} onClick={()=>setTab('history')}>HISTORY</button>}
-        {!user.is_admin && <button className={`nav-tab ${tab==='rules'?'active':''}`}   onClick={()=>setTab('rules')}>RULES</button>}
-        {user.is_admin  && <button className={`nav-tab ${tab==='admin'?'active':''}`}   onClick={()=>setTab('admin')}>ADMIN</button>}
-        {user.is_admin  && <button className={`nav-tab ${tab==='tracker'?'active':''}`} onClick={()=>setTab('tracker')}>ROUND TRACKER</button>}
-        {user.is_admin  && <button className={`nav-tab ${tab==='wagers'?'active':''}`}  onClick={()=>setTab('wagers')}>WAGER LOG</button>}
-        {user.is_admin  && (
+        {!liveUser.is_admin && <button className={`nav-tab ${tab==='picks'?'active':''}`}   onClick={()=>setTab('picks')}>MY PICKS</button>}
+        <button                   className={`nav-tab ${tab==='board'?'active':''}`}    onClick={()=>{ setTab('board'); setLiveWagered(0); }}>LEADERBOARD</button>
+        {!liveUser.is_admin && <button className={`nav-tab ${tab==='history'?'active':''}`} onClick={()=>{ setTab('history'); setLiveWagered(0); }}>HISTORY</button>}
+        {!liveUser.is_admin && <button className={`nav-tab ${tab==='rules'?'active':''}`}   onClick={()=>{ setTab('rules'); setLiveWagered(0); }}>RULES</button>}
+        {liveUser.is_admin  && <button className={`nav-tab ${tab==='admin'?'active':''}`}   onClick={()=>setTab('admin')}>ADMIN</button>}
+        {liveUser.is_admin  && <button className={`nav-tab ${tab==='tracker'?'active':''}`} onClick={()=>setTab('tracker')}>ROUND TRACKER</button>}
+        {liveUser.is_admin  && <button className={`nav-tab ${tab==='wagers'?'active':''}`}  onClick={()=>setTab('wagers')}>WAGER LOG</button>}
+        {liveUser.is_admin  && (
           <button className={`nav-tab ${tab==='notifications'?'active':''}`}
             onClick={()=>{ setTab('notifications'); refreshUnread(); }} style={{position:'relative'}}>
             NOTIFICATIONS
@@ -331,14 +333,14 @@ export default function App() {
         )}
       </nav>
       <main className="main">
-        {tab==='picks'         && !user.is_admin && <PicksView         user={user} appData={appData} onUserUpdate={(u)=>{ setUser(u); sessionStorage.setItem('kelly_session',JSON.stringify(u)); }} />}
-        {tab==='board'         &&                   <LeaderboardView   currentEmail={user.email} appData={appData} />}
-        {tab==='history'       && !user.is_admin && <HistoryView       user={user} />}
-        {tab==='rules'         && !user.is_admin && <RulesView         user={user} appData={appData} />}
-        {tab==='admin'         &&  user.is_admin && <AdminView         appData={appData} onRefresh={loadAppData} />}
-        {tab==='tracker'       &&  user.is_admin && <RoundTrackerView  appData={appData} />}
-        {tab==='wagers'        &&  user.is_admin && <WagerLogView />}
-        {tab==='notifications' &&  user.is_admin && <NotificationsView onRefresh={refreshUnread} />}
+        {tab==='picks'         && !liveUser.is_admin && <PicksView         user={liveUser} appData={appData} onWageredChange={setLiveWagered} onUserUpdate={(u)=>{ setUser(u); sessionStorage.setItem('kelly_session',JSON.stringify(u)); }} />}
+        {tab==='board'         &&                      <LeaderboardView   currentEmail={liveUser.email} appData={appData} />}
+        {tab==='history'       && !liveUser.is_admin && <HistoryView       user={liveUser} />}
+        {tab==='rules'         && !liveUser.is_admin && <RulesView         user={liveUser} appData={appData} />}
+        {tab==='admin'         &&  liveUser.is_admin && <AdminView         appData={appData} onRefresh={loadAppData} />}
+        {tab==='tracker'       &&  liveUser.is_admin && <RoundTrackerView  appData={appData} />}
+        {tab==='wagers'        &&  liveUser.is_admin && <WagerLogView />}
+        {tab==='notifications' &&  liveUser.is_admin && <NotificationsView onRefresh={refreshUnread} />}
       </main>
     </div>
   );
@@ -415,7 +417,7 @@ function AuthScreen({ onLogin }) {
 // ============================================================
 // PICKS VIEW
 // ============================================================
-function PicksView({ user, appData }) {
+function PicksView({ user, appData, onWageredChange }) {
   const { currentRound, startingPoints: globalSP, roundStatus, tournamentComplete } = appData;
   const [games, setGames]         = useState([]);
   const [picks, setPicks]         = useState([]);
@@ -470,6 +472,11 @@ function PicksView({ user, appData }) {
   const totalWagered = picks.reduce((s,p)=>s+(p.wager||0), 0);
   const minRequired  = Math.ceil(startingPoints * 0.5);
   const roundInfo    = ROUNDS[currentRound-1];
+
+  // Keep parent header in sync with current wagered amount
+  useEffect(() => {
+    if (onWageredChange) onWageredChange(totalWagered);
+  }, [totalWagered]);
 
   const savePick = async (gameId, side, wager) => {
     await DB.upsertPick({ email:user.email, game_id:gameId, round:currentRound, side, wager:parseInt(wager) });
