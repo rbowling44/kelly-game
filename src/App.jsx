@@ -162,7 +162,7 @@ const BLANK_GAME = { awayTeam:'', awaySeed:'', homeTeam:'', homeSeed:'', spread:
 function isGameLocked(game) {
   if (game.locked_override === true)  return true;
   if (game.locked_override === false) return false;
-  if (game.status === "final")        return true;
+  if (game.status === "final")        return true;  // always lock once scores saved
   if (!game.tipoff)                   return false;
   return new Date() >= new Date(game.tipoff);
 }
@@ -263,8 +263,8 @@ export default function App() {
   }, []);
 
   const loadAppData = async () => {
-    const [cr, sp, rs] = await Promise.all([DB.currentRound(), DB.startingPoints(), DB.roundStatus()]);
-    setAppData({ currentRound:cr, startingPoints:sp, roundStatus:rs });
+    const [cr, sp, rs, tc] = await Promise.all([DB.currentRound(), DB.startingPoints(), DB.roundStatus(), DB.getSetting('tournament_complete')]);
+    setAppData({ currentRound:cr, startingPoints:sp, roundStatus:rs, tournamentComplete: tc === 'true' });
     setLoading(false);
   };
 
@@ -285,16 +285,26 @@ export default function App() {
   if (loading) return <div className="loading"><span className="spinner"/>LOADING THE KELLY GAME...</div>;
   if (!user)   return <AuthScreen onLogin={login} />;
 
-  const pts = user.rounds?.[appData.currentRound] ?? 0;
+  // Use freshUser points from DB if available via session
+  const savedSession = sessionStorage.getItem('kelly_session');
+  const liveUser = savedSession ? JSON.parse(savedSession) : user;
+  const pts = liveUser.rounds?.[appData.currentRound] ?? 0;
 
   return (
     <div className="app">
       <header className="header">
         <div className="logo">THE KELLY<span> GAME</span></div>
         <div className="header-right">
-          <span className="header-user">{user.name}</span>
-          {!user.is_admin && <span className="header-points">{pts} PTS</span>}
-          {user.is_admin  && <span className="tag tag-open">ADMIN</span>}
+          <span className="header-user">{liveUser.name}</span>
+          {!liveUser.is_admin && <span className="header-points">{pts} PTS</span>}
+          {!liveUser.is_admin && liveUser.paid === false && (
+            <span style={{fontFamily:'DM Mono,monospace',fontSize:10,background:'rgba(231,76,60,0.15)',border:'1px solid rgba(231,76,60,0.4)',color:'var(--red)',padding:'3px 8px',letterSpacing:1}}>💳 UNPAID</span>
+          )}
+          {!liveUser.is_admin && liveUser.paid === true && (
+            <span style={{fontFamily:'DM Mono,monospace',fontSize:10,background:'rgba(77,189,92,0.1)',border:'1px solid rgba(77,189,92,0.3)',color:'var(--kelly)',padding:'3px 8px',letterSpacing:1}}>✓ PAID</span>
+          )}
+          {!liveUser.is_admin && <MessageCommissionerBtn user={liveUser} />}
+          {liveUser.is_admin  && <span className="tag tag-open">ADMIN</span>}
           <button className="btn btn-ghost btn-sm" onClick={logout}>LOGOUT</button>
         </div>
       </header>
@@ -400,7 +410,7 @@ function AuthScreen({ onLogin }) {
 // PICKS VIEW
 // ============================================================
 function PicksView({ user, appData }) {
-  const { currentRound, startingPoints: globalSP, roundStatus } = appData;
+  const { currentRound, startingPoints: globalSP, roundStatus, tournamentComplete } = appData;
   const [games, setGames]         = useState([]);
   const [picks, setPicks]         = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -411,6 +421,12 @@ function PicksView({ user, appData }) {
   const startingPoints = freshUser.rounds?.[currentRound] ?? globalSP;
 
   useEffect(() => { load(); }, [currentRound]);
+
+  // Auto-refresh every 30s so game locks/scores propagate automatically
+  useEffect(() => {
+    const iv = setInterval(() => { silentLoad(); }, 30000);
+    return () => clearInterval(iv);
+  }, [currentRound]);
 
   const load = async () => {
     setLoading(true);
@@ -425,6 +441,18 @@ function PicksView({ user, appData }) {
     setLoading(false);
   };
 
+  // Silent refresh — no loading spinner, just updates data in background
+  const silentLoad = async () => {
+    const [g, p, u] = await Promise.all([
+      DB.getGames(currentRound),
+      DB.getPicks(user.email),
+      DB.getUser(user.email),
+    ]);
+    setGames(g);
+    setPicks(p.filter(x=>x.round===currentRound));
+    if (u) { setFreshUser(u); sessionStorage.setItem('kelly_session', JSON.stringify(u)); }
+  };
+
   const totalWagered = picks.reduce((s,p)=>s+(p.wager||0), 0);
   const minRequired  = Math.ceil(startingPoints * 0.5);
   const roundInfo    = ROUNDS[currentRound-1];
@@ -436,6 +464,12 @@ function PicksView({ user, appData }) {
   const clearPick = async (gameId) => { await DB.deletePick(user.email, gameId); await load(); };
 
   if (loading) return <div className="empty-state">Loading games...</div>;
+
+  // If tournament is over, show final standings instead of picks
+  if (tournamentComplete) {
+    return <FinalStandingsView currentEmail={user.email} />;
+  }
+
   return (
     <div>
       {/* Unpaid banner */}
@@ -461,7 +495,18 @@ function PicksView({ user, appData }) {
         <div className="stat"><span className={`stat-val ${startingPoints-totalWagered>=0?'stat-green':'stat-red'}`}>{startingPoints-totalWagered}</span><span className="stat-label">REMAINING</span></div>
         <div className="stat"><span className={`stat-val ${totalWagered>=minRequired?'stat-green':'stat-red'}`}>{minRequired}</span><span className="stat-label">MIN REQUIRED (50%)</span></div>
       </div>
-      {!roundLocked && totalWagered < minRequired && (
+      {/* Lock-in reminder */}
+      {!roundLocked && (
+        <div style={{background:'rgba(77,189,92,0.07)', border:'1px solid rgba(77,189,92,0.25)',
+          padding:'12px 20px', marginBottom:16, display:'flex', alignItems:'center', gap:12}}>
+          <span style={{fontSize:18}}>💡</span>
+          <div style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'var(--chalk-dim)', lineHeight:1.7}}>
+            <strong style={{color:'var(--kelly)'}}>HOW TO LOCK IN YOUR PICKS:</strong> Select a team, enter your wager amount, then click <strong style={{color:'var(--kelly)'}}>LOCK IN</strong>.
+            Your pick is only saved when you see the <strong style={{color:'var(--red)'}}>red LOCKED IN ✓ button</strong>.
+            View all confirmed picks in your <strong style={{color:'var(--kelly)'}}>HISTORY</strong> tab.
+          </div>
+        </div>
+      )}
         <div style={{background:'rgba(231,76,60,0.15)', border:'2px solid var(--red)', padding:'14px 20px',
           marginBottom:16, display:'flex', alignItems:'center', gap:12}}>
           <span style={{fontSize:24}}>⚠️</span>
@@ -827,7 +872,38 @@ function AdminView({ appData, onRefresh }) {
     setAdminRound(nextRound); flash(`Advanced to ${ROUNDS[nextRound-1]?.name}!`); onRefresh(); loadGames(nextRound);
   };
 
-  const setScore  = (id,side,val) => setLocalScores(p=>({...p,[id]:{...p[id],[side]:val}}));
+  const closeChampionship = async () => {
+    const unfinished = games.filter(g=>g.status!=="final");
+    if (unfinished.length>0) return flash(`${unfinished.length} game(s) missing scores.`,"error");
+    if (!window.confirm("Close the Championship and finalize all standings? This ends The Kelly Game.")) return;
+
+    const [allPicks, allUsers, sp] = await Promise.all([DB.getAllPicks(), DB.getAllUsers(), DB.startingPoints()]);
+    const roundPicks = allPicks.filter(p=>p.round===6);
+    for (const u of allUsers) {
+      if (u.is_admin) continue;
+      const myPicks = roundPicks.filter(p=>p.email===u.email);
+      const startPts = u.rounds?.[6] ?? sp;
+      let pts = startPts;
+      myPicks.forEach(pick => {
+        const game = games.find(g=>g.id===pick.game_id);
+        if (!game||game.status!=="final") return;
+        const {won,push} = calcResult(game, pick.side);
+        if (!push) pts += won ? pick.wager : -pick.wager;
+      });
+      const rounds = {...(u.rounds||{}), 6: Math.max(0,pts), final: Math.max(0,pts)};
+      const history = [...(u.history||[]), {round:6, startPts, endPts:pts}];
+      await DB.upsertUser({...u, rounds, history});
+    }
+    const rs = await reloadRoundStatus();
+    rs[6]="complete";
+    await Promise.all([
+      DB.setSetting('round_status', rs),
+      DB.setSetting('tournament_complete', 'true'),
+    ]);
+    setRoundStatus({...rs});
+    flash("🏆 Championship closed! Final standings are now live for all players.");
+    onRefresh();
+  };
   const setSpread = (id,val)      => setLocalSpreads(p=>({...p,[id]:val}));
   const setNG     = (k,v)         => setNewGame(p=>({...p,[k]:v}));
   const rsVal = roundStatus[adminRound]||"open";
@@ -925,6 +1001,7 @@ function AdminView({ appData, onRefresh }) {
           {rsVal==="open"   && <button className="btn btn-red"   onClick={lockRound}>🔒 LOCK ROUND {adminRound} — CLOSE PICKS</button>}
           {rsVal==="locked" && <button className="btn btn-ghost" onClick={unlockRound}>🔓 RE-OPEN PICKS</button>}
           {rsVal!=="open"   && adminRound<6 && <button className="btn btn-green" onClick={advanceRound}>▶ SETTLE &amp; ADVANCE TO {ROUNDS[adminRound]?.name?.toUpperCase()}</button>}
+          {rsVal!=="open"   && adminRound===6 && <button className="btn btn-green" onClick={closeChampionship}>🏆 CLOSE CHAMPIONSHIP &amp; FINALIZE STANDINGS</button>}
         </div>
         <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)'}}>
           Viewing R{adminRound} · Active R{activeRound} · {rsVal.toUpperCase()} · {games.filter(g=>g.status==='final').length}/{games.length} games final
@@ -1476,9 +1553,141 @@ function RulesView({ user, appData }) {
 
       <Rule num="10" title="COMMISSIONER'S DISCRETION">
         The commissioner has final say on all disputes, technical issues, and scoring corrections.
-        If you believe a result was scored incorrectly, contact the commissioner directly.
+        If you believe a result was scored incorrectly, or have any questions, use the{' '}
+        <Highlight>✉ MSG COMMISSIONER</Highlight> button in the top right corner of your screen to send a direct message.
+        The commissioner will be notified immediately.
         Be a good sport — it's all for fun. 🏀
       </Rule>
+    </div>
+  );
+}
+
+// ============================================================
+// MESSAGE COMMISSIONER BUTTON
+// ============================================================
+function MessageCommissionerBtn({ user }) {
+  const [open, setOpen]     = useState(false);
+  const [msg, setMsg]       = useState("");
+  const [sent, setSent]     = useState(false);
+  const [busy, setBusy]     = useState(false);
+
+  const send = async () => {
+    if (!msg.trim()) return;
+    setBusy(true);
+    await DB.addNotification({
+      type: 'player_message',
+      email: user.email,
+      name: user.name,
+      message: `Message from ${user.name} (${user.email}): "${msg.trim()}"`,
+      read: false
+    });
+    setSent(true); setBusy(false);
+    setTimeout(() => { setOpen(false); setSent(false); setMsg(""); }, 2000);
+  };
+
+  return (
+    <>
+      <button onClick={()=>setOpen(true)} style={{
+        fontFamily:'DM Mono,monospace', fontSize:10, padding:'4px 10px', cursor:'pointer',
+        background:'rgba(77,189,92,0.08)', border:'1px solid rgba(77,189,92,0.25)',
+        color:'var(--chalk-dim)', letterSpacing:1
+      }}>✉ MSG COMMISSIONER</button>
+
+      {open && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:24}}>
+          <div style={{background:'var(--hardwood)',border:'1px solid var(--kelly)',padding:32,width:'100%',maxWidth:480,position:'relative'}}>
+            <button onClick={()=>setOpen(false)} style={{position:'absolute',top:12,right:16,background:'none',border:'none',color:'var(--chalk-dim)',cursor:'pointer',fontSize:20}}>✕</button>
+            <div style={{fontFamily:'Bebas Neue,sans-serif',fontSize:24,letterSpacing:2,color:'var(--kelly)',marginBottom:16}}>MESSAGE COMMISSIONER</div>
+            {sent ? (
+              <div className="success-msg">✓ Message sent! The commissioner will be notified.</div>
+            ) : (
+              <>
+                <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)',marginBottom:12}}>
+                  Send a message to the commissioner. They'll see it in their Notifications tab.
+                </div>
+                <textarea value={msg} onChange={e=>setMsg(e.target.value)}
+                  placeholder="Type your message here..."
+                  style={{width:'100%',background:'rgba(255,255,255,0.05)',border:'1px solid var(--line)',color:'var(--chalk)',padding:12,fontFamily:'DM Mono,monospace',fontSize:13,outline:'none',resize:'vertical',minHeight:100,marginBottom:12}} />
+                <button className="btn btn-kelly btn-full" onClick={send} disabled={busy||!msg.trim()}>
+                  {busy?'SENDING...':'SEND MESSAGE'}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ============================================================
+// FINAL STANDINGS VIEW (shown on picks page when tournament done)
+// ============================================================
+function FinalStandingsView({ currentEmail }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const [users, allPicks, allGames] = await Promise.all([DB.getAllUsers(), DB.getAllPicks(), DB.getGames()]);
+      const built = users.filter(u=>!u.is_admin).map(u => {
+        const myPicks = allPicks.filter(p=>p.email===u.email);
+        const finalPts = u.rounds?.final ?? u.rounds?.[6] ?? 0;
+        let wins=0, losses=0;
+        myPicks.forEach(pick => {
+          const game = allGames.find(g=>g.id===pick.game_id)||pick.games;
+          if (game?.status==="final") {
+            const {won,push} = calcResult(game,pick.side);
+            if (!push) { if(won) wins++; else losses++; }
+          }
+        });
+        return {...u, finalPts, wins, losses};
+      }).sort((a,b)=>b.finalPts-a.finalPts);
+      setRows(built); setLoading(false);
+    })();
+  }, []);
+
+  return (
+    <div>
+      <div style={{background:'linear-gradient(135deg, rgba(240,192,64,0.15), rgba(77,189,92,0.1))',
+        border:'2px solid var(--gold)', padding:'24px', marginBottom:24, textAlign:'center'}}>
+        <div style={{fontFamily:'Bebas Neue,sans-serif',fontSize:48,letterSpacing:4,color:'var(--gold)'}}>🏆 TOURNAMENT COMPLETE</div>
+        <div style={{fontFamily:'DM Mono,monospace',fontSize:12,color:'var(--chalk-dim)',marginTop:4}}>
+          THE KELLY GAME · FINAL STANDINGS
+        </div>
+      </div>
+
+      <div style={{background:'var(--hardwood)', border:'1px solid var(--line)'}}>
+        <div style={{display:'grid', gridTemplateColumns:'48px 1fr 100px 60px 60px',
+          padding:'8px 24px', borderBottom:'1px solid var(--line)',
+          fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)', letterSpacing:1}}>
+          <span>#</span><span>PLAYER</span><span style={{textAlign:'right'}}>FINAL PTS</span>
+          <span style={{textAlign:'right'}}>W</span><span style={{textAlign:'right'}}>L</span>
+        </div>
+        {loading && <div className="empty-state">Loading standings...</div>}
+        {rows.map((row, i) => (
+          <div key={row.email} style={{
+            display:'grid', gridTemplateColumns:'48px 1fr 100px 60px 60px',
+            padding:'16px 24px', borderBottom:'1px solid var(--line)',
+            alignItems:'center',
+            background: row.email===currentEmail ? 'rgba(77,189,92,0.08)' : 'transparent',
+            borderLeft: row.email===currentEmail ? '3px solid var(--kelly)' : '3px solid transparent'
+          }}>
+            <span style={{fontFamily:'Bebas Neue,sans-serif', fontSize:28,
+              color: i===0?'var(--gold)':i===1?'#aaa':i===2?'#cd7f32':'var(--chalk-dim)'}}>
+              {i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}
+            </span>
+            <div>
+              <div style={{fontFamily:'Barlow Condensed,sans-serif', fontWeight:600, fontSize:20}}>{row.name}</div>
+              {row.email===currentEmail && <div style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--kelly)'}}>YOU</div>}
+            </div>
+            <span style={{textAlign:'right', fontFamily:'Bebas Neue,sans-serif', fontSize:28,
+              color: i===0?'var(--gold)':'var(--chalk)'}}>{row.finalPts}</span>
+            <span style={{textAlign:'right', fontFamily:'DM Mono,monospace', color:'var(--green)'}}>{row.wins}</span>
+            <span style={{textAlign:'right', fontFamily:'DM Mono,monospace', color:'var(--red)'}}>{row.losses}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
