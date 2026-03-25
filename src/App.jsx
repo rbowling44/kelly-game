@@ -216,18 +216,23 @@ const DB = {
   async deleteNotification(id)   { await supabase.from('notifications').delete().eq('id',id); },
   async clearNotifications()     { await supabase.from('notifications').delete().neq('id',0); },
   async resetAllGameData()       {
-    // Wipe picks, games, reset all player points/history, reset round to 1
+    // Read current starting points first
+    const spData = await supabase.from('settings').select('value').eq('key','starting_points').single();
+    const sp = parseInt(spData.data?.value) || 100;
+    // Wipe picks, games, notifications
     await supabase.from('picks').delete().neq('id', 0);
     await supabase.from('games').delete().neq('id', 'x');
     await supabase.from('notifications').delete().neq('id', 0);
+    // Reset all players
     const { data: users } = await supabase.from('users').select('*');
-    const sp = parseInt((await supabase.from('settings').select('value').eq('key','starting_points').single()).data?.value) || 100;
     for (const u of (users||[])) {
       if (u.is_admin) continue;
       await supabase.from('users').update({ rounds: { 1: sp }, history: [] }).eq('email', u.email);
     }
+    // Reset all settings
     await supabase.from('settings').upsert({ key: 'current_round', value: '1' });
     await supabase.from('settings').upsert({ key: 'round_status', value: { 1: 'open' } });
+    await supabase.from('settings').upsert({ key: 'tournament_complete', value: 'false' });
   },
 };
 
@@ -415,6 +420,7 @@ function PicksView({ user, appData }) {
   const [picks, setPicks]         = useState([]);
   const [loading, setLoading]     = useState(true);
   const [freshUser, setFreshUser] = useState(user);
+  const [tournamentCompleteLive, setTournamentCompleteLive] = useState(tournamentComplete);
   const roundLocked = roundStatus[currentRound] === "locked" || roundStatus[currentRound] === "complete";
 
   // Always pull fresh user from DB so points are never stale after a round advance
@@ -430,27 +436,34 @@ function PicksView({ user, appData }) {
 
   const load = async () => {
     setLoading(true);
-    const [g, p, u] = await Promise.all([
+    const [g, p, u, tc] = await Promise.all([
       DB.getGames(currentRound),
       DB.getPicks(user.email),
       DB.getUser(user.email),
+      DB.getSetting('tournament_complete'),
     ]);
     setGames(g);
     setPicks(p.filter(x=>x.round===currentRound));
     if (u) { setFreshUser(u); sessionStorage.setItem('kelly_session', JSON.stringify(u)); }
+    // Override tournamentComplete from live DB value
+    if (tc === 'false' || !tc) setTournamentCompleteLive(false);
+    else if (tc === 'true') setTournamentCompleteLive(true);
     setLoading(false);
   };
 
   // Silent refresh — no loading spinner, just updates data in background
   const silentLoad = async () => {
-    const [g, p, u] = await Promise.all([
+    const [g, p, u, tc] = await Promise.all([
       DB.getGames(currentRound),
       DB.getPicks(user.email),
       DB.getUser(user.email),
+      DB.getSetting('tournament_complete'),
     ]);
     setGames(g);
     setPicks(p.filter(x=>x.round===currentRound));
     if (u) { setFreshUser(u); sessionStorage.setItem('kelly_session', JSON.stringify(u)); }
+    if (tc === 'false' || !tc) setTournamentCompleteLive(false);
+    else if (tc === 'true') setTournamentCompleteLive(true);
   };
 
   const totalWagered = picks.reduce((s,p)=>s+(p.wager||0), 0);
@@ -466,7 +479,7 @@ function PicksView({ user, appData }) {
   if (loading) return <div className="empty-state">Loading games...</div>;
 
   // If tournament is over, show final standings instead of picks
-  if (tournamentComplete) {
+  if (tournamentCompleteLive) {
     return <FinalStandingsView currentEmail={user.email} />;
   }
 
@@ -631,7 +644,7 @@ function GameCard({ game, myPick, locked, gameLocked, startingPoints, totalWager
 // LEADERBOARD
 // ============================================================
 function LeaderboardView({ currentEmail, appData }) {
-  const { currentRound } = appData;
+  const { currentRound, startingPoints: globalSP } = appData;
   const [rows, setRows]     = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -642,7 +655,7 @@ function LeaderboardView({ currentEmail, appData }) {
     const [users, allPicks, allGames] = await Promise.all([DB.getAllUsers(), DB.getAllPicks(), DB.getGames()]);
     const built = users.filter(u=>!u.is_admin).map(u => {
       const myPicks = allPicks.filter(p=>p.email===u.email);
-      let totalPoints = u.rounds?.[currentRound] ?? 100;
+      let totalPoints = u.rounds?.[currentRound] ?? globalSP;
       let totalWins=0, totalLosses=0, totalPushes=0, totalWagered=0;
       myPicks.forEach(pick => {
         const game = allGames.find(g=>g.id===pick.game_id) || pick.games;
@@ -1073,11 +1086,15 @@ function AdminPlayers({ appData, onRefresh }) {
   };
 
   const resetAllData = async () => {
-    if (!window.confirm("⚠️ RESET ALL DATA?\n\nThis will:\n• Delete ALL picks\n• Delete ALL games\n• Reset ALL player points to starting value\n• Reset to Round 1\n\nThis cannot be undone. Are you sure?")) return;
+    if (!window.confirm("⚠️ RESET ALL DATA?\n\nThis will:\n• Delete ALL picks\n• Delete ALL games\n• Reset ALL player points to current starting value\n• Clear tournament complete status\n• Reset to Round 1\n\nThis cannot be undone. Are you sure?")) return;
     flash("Resetting... please wait.");
     await DB.resetAllGameData();
-    setPlayers(prev => prev.map(p => ({...p, rounds: {1: globalSP}, history: []})));
-    flash("✓ All data reset. Game is back to Round 1 with fresh point totals.");
+    // Reload fresh player data from DB
+    const freshPlayers = await DB.getAllUsers();
+    setPlayers(freshPlayers.filter(x=>!x.is_admin));
+    // Clear any stale player sessions so their points update on next load
+    sessionStorage.removeItem('kelly_session');
+    flash(`✓ Reset complete. All players start with ${globalSP} pts. Round reset to 1.`);
     onRefresh();
   };
 
