@@ -507,6 +507,7 @@ function PicksView({ user, appData }) {
           </div>
         </div>
       )}
+      {!roundLocked && totalWagered < minRequired && (
         <div style={{background:'rgba(231,76,60,0.15)', border:'2px solid var(--red)', padding:'14px 20px',
           marginBottom:16, display:'flex', alignItems:'center', gap:12}}>
           <span style={{fontSize:24}}>⚠️</span>
