@@ -297,11 +297,11 @@ export default function App() {
         <div className="header-right">
           <span className="header-user">{liveUser.name}</span>
           {!liveUser.is_admin && <span className="header-points">{pts} PTS</span>}
-          {!liveUser.is_admin && liveUser.paid === false && (
-            <span style={{fontFamily:'DM Mono,monospace',fontSize:10,background:'rgba(231,76,60,0.15)',border:'1px solid rgba(231,76,60,0.4)',color:'var(--red)',padding:'3px 8px',letterSpacing:1}}>💳 UNPAID</span>
-          )}
           {!liveUser.is_admin && liveUser.paid === true && (
             <span style={{fontFamily:'DM Mono,monospace',fontSize:10,background:'rgba(77,189,92,0.1)',border:'1px solid rgba(77,189,92,0.3)',color:'var(--kelly)',padding:'3px 8px',letterSpacing:1}}>✓ PAID</span>
+          )}
+          {!liveUser.is_admin && liveUser.paid !== true && (
+            <span style={{fontFamily:'DM Mono,monospace',fontSize:10,background:'rgba(231,76,60,0.15)',border:'1px solid rgba(231,76,60,0.4)',color:'var(--red)',padding:'3px 8px',letterSpacing:1}}>💳 UNPAID</span>
           )}
           {!liveUser.is_admin && <MessageCommissionerBtn user={liveUser} />}
           {liveUser.is_admin  && <span className="tag tag-open">ADMIN</span>}
@@ -473,7 +473,7 @@ function PicksView({ user, appData }) {
   return (
     <div>
       {/* Unpaid banner */}
-      {freshUser.paid === false && (
+      {freshUser.paid !== true && (
         <div style={{background:'rgba(231,76,60,0.12)', border:'1px solid rgba(231,76,60,0.4)',
           padding:'12px 20px', marginBottom:16, display:'flex', alignItems:'center', gap:12}}>
           <span style={{fontSize:20}}>💳</span>
@@ -1391,8 +1391,12 @@ function WagerLogView() {
 // NOTIFICATIONS
 // ============================================================
 function NotificationsView({ onRefresh }) {
-  const [notes, setNotes]     = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [notes, setNotes]       = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [replyingTo, setReplyingTo] = useState(null); // note id being replied to
+  const [replyMsg, setReplyMsg] = useState("");
+  const [replying, setReplying] = useState(false);
+
   useEffect(() => { DB.getNotifications().then(n=>{ setNotes(n); setLoading(false); }); }, []);
 
   const markRead    = async (id) => { await DB.updateNotification(id,{read:true}); setNotes(p=>p.map(n=>n.id===id?{...n,read:true}:n)); onRefresh(); };
@@ -1400,7 +1404,44 @@ function NotificationsView({ onRefresh }) {
   const deleteNote  = async (id) => { await DB.deleteNotification(id); setNotes(p=>p.filter(n=>n.id!==id)); };
   const clearAll    = async ()   => { await DB.clearNotifications(); setNotes([]); };
 
+  const sendReply = async (note) => {
+    if (!replyMsg.trim()) return;
+    setReplying(true);
+    // Store reply as a special notification the player will see
+    await DB.addNotification({
+      type: 'commissioner_reply',
+      email: note.email,
+      name: 'Commissioner',
+      message: `Reply from Commissioner to ${note.name}: "${replyMsg.trim()}"`,
+      reply_to_email: note.email,
+      read: false,
+    });
+    // Mark original as read
+    await DB.updateNotification(note.id, { read: true, replied: true });
+    setNotes(p => p.map(n => n.id===note.id ? {...n, read:true, replied:true} : n));
+    setReplyingTo(null);
+    setReplyMsg("");
+    setReplying(false);
+    onRefresh();
+  };
+
   const unreadCount = notes.filter(n=>!n.read).length;
+
+  const typeIcon = (type) => {
+    if (type==='forgot_password') return '🔑';
+    if (type==='player_message')  return '💬';
+    if (type==='commissioner_reply') return '📩';
+    return '📣';
+  };
+
+  const typeLabel = (type) => {
+    if (type==='forgot_password')    return 'PASSWORD RESET REQUEST';
+    if (type==='player_message')     return 'MESSAGE FROM PLAYER';
+    if (type==='commissioner_reply') return 'COMMISSIONER REPLY (sent)';
+    return 'NOTIFICATION';
+  };
+
+  const canReply = (note) => note.type === 'player_message' || note.type === 'forgot_password';
 
   return (
     <div>
@@ -1415,21 +1456,62 @@ function NotificationsView({ onRefresh }) {
       {!loading && notes.length===0 && <div className="empty-state">No notifications yet.</div>}
       <div style={{display:'flex',flexDirection:'column',gap:8}}>
         {notes.map(note => (
-          <div key={note.id} style={{background:note.read?'var(--hardwood)':'rgba(77,189,92,0.06)',border:note.read?'1px solid var(--line)':'1px solid rgba(77,189,92,0.25)',padding:'16px 20px',display:'flex',alignItems:'flex-start',gap:16}}>
-            <div style={{fontSize:24,flexShrink:0}}>{note.type==='forgot_password'?'🔑':'📣'}</div>
-            <div style={{flex:1}}>
-              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4,flexWrap:'wrap'}}>
-                {!note.read && <span style={{background:'var(--kelly)',color:'var(--court)',fontSize:9,fontFamily:'DM Mono,monospace',padding:'2px 6px',letterSpacing:1}}>NEW</span>}
-                <span style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)'}}>{note.type==='forgot_password'?'PASSWORD RESET REQUEST':'NOTIFICATION'}</span>
-                <span style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)',marginLeft:'auto'}}>{formatCT(note.created_at)}</span>
+          <div key={note.id} style={{
+            background:note.read?'var(--hardwood)':'rgba(77,189,92,0.06)',
+            border:note.read?'1px solid var(--line)':'1px solid rgba(77,189,92,0.25)',
+            overflow:'hidden'
+          }}>
+            <div style={{padding:'16px 20px',display:'flex',alignItems:'flex-start',gap:16}}>
+              <div style={{fontSize:24,flexShrink:0}}>{typeIcon(note.type)}</div>
+              <div style={{flex:1}}>
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4,flexWrap:'wrap'}}>
+                  {!note.read && <span style={{background:'var(--kelly)',color:'var(--court)',fontSize:9,fontFamily:'DM Mono,monospace',padding:'2px 6px',letterSpacing:1}}>NEW</span>}
+                  {note.replied && <span style={{background:'rgba(77,189,92,0.1)',color:'var(--kelly)',fontSize:9,fontFamily:'DM Mono,monospace',padding:'2px 6px',letterSpacing:1,border:'1px solid rgba(77,189,92,0.3)'}}>REPLIED</span>}
+                  <span style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)'}}>{typeLabel(note.type)}</span>
+                  <span style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)',marginLeft:'auto'}}>{formatCT(note.created_at)}</span>
+                </div>
+                <div style={{fontSize:15,color:'var(--chalk)',marginBottom:6}}>{note.message}</div>
+                {note.type==='forgot_password' && (
+                  <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)'}}>
+                    → Go to <strong style={{color:'var(--kelly)'}}>ADMIN → Registered Players</strong> to reset their password.
+                  </div>
+                )}
+                {note.email && note.type !== 'commissioner_reply' && (
+                  <div style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)',marginTop:4}}>
+                    From: <strong style={{color:'var(--chalk)'}}>{note.name}</strong> · {note.email}
+                  </div>
+                )}
               </div>
-              <div style={{fontSize:15,color:'var(--chalk)',marginBottom:6}}>{note.message}</div>
-              {note.type==='forgot_password' && <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)'}}>→ Go to <strong style={{color:'var(--kelly)'}}>ADMIN → Registered Players</strong> to reset their password.</div>}
+              <div style={{display:'flex',gap:6,flexShrink:0,flexDirection:'column',alignItems:'flex-end'}}>
+                {canReply(note) && (
+                  <button className="btn btn-kelly btn-sm" style={{fontSize:10}}
+                    onClick={()=>{ setReplyingTo(replyingTo===note.id?null:note.id); setReplyMsg(""); }}>
+                    {replyingTo===note.id ? '✕ CANCEL' : '↩ REPLY'}
+                  </button>
+                )}
+                {!note.read && <button className="btn btn-ghost btn-sm" style={{fontSize:10}} onClick={()=>markRead(note.id)}>MARK READ</button>}
+                <button className="btn btn-ghost btn-sm" style={{fontSize:10,color:'var(--red)',borderColor:'rgba(231,76,60,0.3)'}} onClick={()=>deleteNote(note.id)}>✕</button>
+              </div>
             </div>
-            <div style={{display:'flex',gap:6,flexShrink:0}}>
-              {!note.read && <button className="btn btn-ghost btn-sm" style={{fontSize:10}} onClick={()=>markRead(note.id)}>MARK READ</button>}
-              <button className="btn btn-ghost btn-sm" style={{fontSize:10,color:'var(--red)',borderColor:'rgba(231,76,60,0.3)'}} onClick={()=>deleteNote(note.id)}>✕</button>
-            </div>
+
+            {/* Reply panel */}
+            {replyingTo === note.id && (
+              <div style={{borderTop:'1px solid var(--line)',padding:'16px 20px',background:'rgba(77,189,92,0.04)'}}>
+                <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--kelly)',marginBottom:8,letterSpacing:1}}>
+                  ↩ REPLY TO {note.name?.toUpperCase()}
+                </div>
+                <textarea value={replyMsg} onChange={e=>setReplyMsg(e.target.value)}
+                  placeholder={`Type your reply to ${note.name}...`}
+                  style={{width:'100%',background:'rgba(255,255,255,0.05)',border:'1px solid var(--line)',color:'var(--chalk)',
+                    padding:12,fontFamily:'DM Mono,monospace',fontSize:13,outline:'none',resize:'vertical',minHeight:80,marginBottom:10}} />
+                <button className="btn btn-kelly btn-sm" onClick={()=>sendReply(note)} disabled={replying||!replyMsg.trim()}>
+                  {replying?'SENDING...':'SEND REPLY TO PLAYER'}
+                </button>
+                <div style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)',marginTop:8}}>
+                  The player will see your reply in their notifications.
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -1474,7 +1556,7 @@ function RulesView({ user, appData }) {
           <div className="round-name">RULES OF THE KELLY GAME</div>
           <div className="round-dates">NCAA Tournament · Spread Game</div>
         </div>
-        {user.paid === false && (
+        {user.paid !== true && (
           <span style={{fontFamily:'DM Mono,monospace',fontSize:11,background:'rgba(231,76,60,0.15)',
             border:'1px solid rgba(231,76,60,0.4)',color:'var(--red)',padding:'6px 14px'}}>
             💳 ENTRY FEE OUTSTANDING
@@ -1567,10 +1649,21 @@ function RulesView({ user, appData }) {
 // MESSAGE COMMISSIONER BUTTON
 // ============================================================
 function MessageCommissionerBtn({ user }) {
-  const [open, setOpen]     = useState(false);
-  const [msg, setMsg]       = useState("");
-  const [sent, setSent]     = useState(false);
-  const [busy, setBusy]     = useState(false);
+  const [open, setOpen]       = useState(false);
+  const [msg, setMsg]         = useState("");
+  const [sent, setSent]       = useState(false);
+  const [busy, setBusy]       = useState(false);
+  const [replies, setReplies] = useState([]);
+
+  useEffect(() => {
+    // Load any commissioner replies for this player
+    DB.getNotifications().then(notes => {
+      const mine = notes.filter(n => n.type === 'commissioner_reply' && n.reply_to_email === user.email);
+      setReplies(mine);
+    });
+  }, [open]);
+
+  const unreadReplies = replies.filter(r => !r.read).length;
 
   const send = async () => {
     if (!msg.trim()) return;
@@ -1583,32 +1676,64 @@ function MessageCommissionerBtn({ user }) {
       read: false
     });
     setSent(true); setBusy(false);
-    setTimeout(() => { setOpen(false); setSent(false); setMsg(""); }, 2000);
+    setTimeout(() => { setSent(false); setMsg(""); }, 2500);
+  };
+
+  const markReplyRead = async (id) => {
+    await DB.updateNotification(id, { read: true });
+    setReplies(prev => prev.map(r => r.id===id ? {...r, read:true} : r));
   };
 
   return (
     <>
       <button onClick={()=>setOpen(true)} style={{
         fontFamily:'DM Mono,monospace', fontSize:10, padding:'4px 10px', cursor:'pointer',
-        background:'rgba(77,189,92,0.08)', border:'1px solid rgba(77,189,92,0.25)',
-        color:'var(--chalk-dim)', letterSpacing:1
-      }}>✉ MSG COMMISSIONER</button>
+        background: unreadReplies>0 ? 'rgba(77,189,92,0.15)' : 'rgba(77,189,92,0.08)',
+        border: unreadReplies>0 ? '1px solid rgba(77,189,92,0.5)' : '1px solid rgba(77,189,92,0.25)',
+        color: unreadReplies>0 ? 'var(--kelly)' : 'var(--chalk-dim)',
+        letterSpacing:1, position:'relative'
+      }}>
+        {unreadReplies>0 ? `📩 ${unreadReplies} REPLY` : '✉ MSG COMMISSIONER'}
+      </button>
 
       {open && (
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:24}}>
-          <div style={{background:'var(--hardwood)',border:'1px solid var(--kelly)',padding:32,width:'100%',maxWidth:480,position:'relative'}}>
+          <div style={{background:'var(--hardwood)',border:'1px solid var(--kelly)',padding:32,width:'100%',maxWidth:520,position:'relative',maxHeight:'80vh',overflowY:'auto'}}>
             <button onClick={()=>setOpen(false)} style={{position:'absolute',top:12,right:16,background:'none',border:'none',color:'var(--chalk-dim)',cursor:'pointer',fontSize:20}}>✕</button>
-            <div style={{fontFamily:'Bebas Neue,sans-serif',fontSize:24,letterSpacing:2,color:'var(--kelly)',marginBottom:16}}>MESSAGE COMMISSIONER</div>
+            <div style={{fontFamily:'Bebas Neue,sans-serif',fontSize:24,letterSpacing:2,color:'var(--kelly)',marginBottom:16}}>COMMISSIONER INBOX</div>
+
+            {/* Commissioner replies */}
+            {replies.length > 0 && (
+              <div style={{marginBottom:20}}>
+                <div style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)',letterSpacing:1,marginBottom:8}}>REPLIES FROM COMMISSIONER</div>
+                {replies.map(r => (
+                  <div key={r.id} style={{background: r.read?'rgba(255,255,255,0.03)':'rgba(77,189,92,0.08)',
+                    border: r.read?'1px solid var(--line)':'1px solid rgba(77,189,92,0.3)',
+                    padding:'12px 16px', marginBottom:8}}>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                      {!r.read && <span style={{background:'var(--kelly)',color:'var(--court)',fontSize:9,fontFamily:'DM Mono,monospace',padding:'1px 6px'}}>NEW</span>}
+                      <span style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)',marginLeft:'auto'}}>{formatCT(r.created_at)}</span>
+                    </div>
+                    <div style={{fontFamily:'DM Mono,monospace',fontSize:12,color:'var(--chalk)',lineHeight:1.6}}>{r.message}</div>
+                    {!r.read && <button className="btn btn-ghost btn-sm" style={{fontSize:9,marginTop:8}} onClick={()=>markReplyRead(r.id)}>MARK READ</button>}
+                  </div>
+                ))}
+                <div className="divider" />
+              </div>
+            )}
+
+            {/* Send message */}
+            <div style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)',letterSpacing:1,marginBottom:8}}>SEND A MESSAGE</div>
             {sent ? (
               <div className="success-msg">✓ Message sent! The commissioner will be notified.</div>
             ) : (
               <>
                 <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)',marginBottom:12}}>
-                  Send a message to the commissioner. They'll see it in their Notifications tab.
+                  Questions, disputes, or payment confirmation — the commissioner will reply here.
                 </div>
                 <textarea value={msg} onChange={e=>setMsg(e.target.value)}
                   placeholder="Type your message here..."
-                  style={{width:'100%',background:'rgba(255,255,255,0.05)',border:'1px solid var(--line)',color:'var(--chalk)',padding:12,fontFamily:'DM Mono,monospace',fontSize:13,outline:'none',resize:'vertical',minHeight:100,marginBottom:12}} />
+                  style={{width:'100%',background:'rgba(255,255,255,0.05)',border:'1px solid var(--line)',color:'var(--chalk)',padding:12,fontFamily:'DM Mono,monospace',fontSize:13,outline:'none',resize:'vertical',minHeight:80,marginBottom:12}} />
                 <button className="btn btn-kelly btn-full" onClick={send} disabled={busy||!msg.trim()}>
                   {busy?'SENDING...':'SEND MESSAGE'}
                 </button>
