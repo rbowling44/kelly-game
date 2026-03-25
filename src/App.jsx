@@ -241,11 +241,12 @@ const DB = {
 // APP
 // ============================================================
 export default function App() {
-  const [user, setUser]     = useState(null);
-  const [tab, setTab]       = useState("picks");
-  const [loading, setLoading] = useState(true);
-  const [appData, setAppData] = useState({ currentRound:1, startingPoints:100, roundStatus:{} });
-  const [unread, setUnread]   = useState(0);
+  const [user, setUser]         = useState(null);
+  const [tab, setTab]           = useState("picks");
+  const [loading, setLoading]   = useState(true);
+  const [appData, setAppData]   = useState({ currentRound:1, startingPoints:100, roundStatus:{} });
+  const [unread, setUnread]     = useState(0);
+  const [liveWagered, setLiveWagered] = useState(0);
 
   useEffect(() => {
     const style = document.createElement('style');
@@ -295,7 +296,6 @@ export default function App() {
   const savedSession = sessionStorage.getItem('kelly_session');
   const liveUser = savedSession ? JSON.parse(savedSession) : user;
   const startPts = liveUser.rounds?.[appData.currentRound] ?? 0;
-  const [liveWagered, setLiveWagered] = useState(0);
   const pts = Math.max(0, startPts - liveWagered);
 
   return (
