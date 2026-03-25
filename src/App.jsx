@@ -199,6 +199,7 @@ const DB = {
   async getUser(email)  { const {data} = await supabase.from('users').select('*').eq('email',email.toLowerCase()).single(); return data; },
   async getAllUsers()    { const {data} = await supabase.from('users').select('*'); return data||[]; },
   async upsertUser(u)   { await supabase.from('users').upsert(u); },
+  async updateUser(email, fields) { const {error} = await supabase.from('users').update(fields).eq('email', email); return error; },
 
   async getGames(round) { const q = supabase.from('games').select('*'); if(round) q.eq('round',round); const {data}=await q; return data||[]; },
   async upsertGame(g)   { await supabase.from('games').upsert(g); },
@@ -1055,7 +1056,7 @@ function AdminPlayers({ appData, onRefresh }) {
     if (isNaN(val)||val<0) return flash("Enter a valid point value.");
     const u = players.find(p=>p.email===email);
     const rounds = {...(u.rounds||{}), [currentRound]:val};
-    await DB.upsertUser({...u, rounds});
+    await DB.updateUser(email, { rounds });
     setPlayers(prev=>prev.map(p=>p.email===email?{...p,rounds}:p));
     flash(`Updated ${u.name} to ${val} pts.`); onRefresh();
   };
@@ -1064,7 +1065,7 @@ function AdminPlayers({ appData, onRefresh }) {
     const newPwd = editPwd[email]?.trim();
     if (!newPwd||newPwd.length<4) return flash("Password must be at least 4 characters.");
     const u = players.find(p=>p.email===email);
-    await DB.upsertUser({...u, password:btoa(newPwd)});
+    await DB.updateUser(email, { password: btoa(newPwd) });
     setEditPwd(prev=>({...prev,[email]:""}));
     flash(`Password reset for ${u.name}.`);
   };
@@ -1072,8 +1073,15 @@ function AdminPlayers({ appData, onRefresh }) {
   const togglePaid = async (email) => {
     const u = players.find(p=>p.email===email);
     const paid = !u.paid;
-    await DB.upsertUser({...u, paid});
+    const error = await DB.updateUser(email, { paid });
+    if (error) { flash(`Error updating paid status: ${error.message}`); return; }
     setPlayers(prev=>prev.map(p=>p.email===email?{...p,paid}:p));
+    // Also update session if this player is logged in
+    const session = sessionStorage.getItem('kelly_session');
+    if (session) {
+      const s = JSON.parse(session);
+      if (s.email === email) sessionStorage.setItem('kelly_session', JSON.stringify({...s, paid}));
+    }
     flash(`${u.name} marked as ${paid?'PAID ✓':'UNPAID'}.`);
   };
 
