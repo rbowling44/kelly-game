@@ -803,7 +803,14 @@ function AdminView({ appData, onRefresh }) {
       if (val==="") continue;
       await DB.updateGame(id, { spread: parseFloat(val) }); n++;
     }
-    flash(`Updated spreads for ${n} game(s).`); loadGames(adminRound);
+    flash(`Updated spreads for ${n} game(s).`);
+    // Only reload game metadata, preserve score inputs by merging
+    const g = await DB.getGames(adminRound);
+    setGames(g);
+    // Update spreads in localSpreads from DB but DON'T reset localScores
+    const sp={};
+    g.forEach(x=>{ sp[x.id]=x.spread?.toString()??''; });
+    setLocalSpreads(sp);
   };
 
   const saveScores = async () => {
@@ -813,10 +820,12 @@ function AdminView({ appData, onRefresh }) {
       await DB.updateGame(id, { away_score: parseInt(sc.away), home_score: parseInt(sc.home), status: "final" }); n++;
     }
     if (n === 0) {
-      flash("No scores to save — make sure you've entered scores in both fields.", "error");
+      flash("No scores to save — enter scores in both home and away fields first.", "error");
       return;
     }
-    flash(`Scores saved for ${n} game(s).`); loadGames(adminRound);
+    flash(`Scores saved for ${n} game(s).`);
+    // Reload everything fresh after saving
+    loadGames(adminRound);
   };
 
   const addGame = async () => {
@@ -919,6 +928,7 @@ function AdminView({ appData, onRefresh }) {
     flash("🏆 Championship closed! Final standings are now live for all players.");
     onRefresh();
   };
+  const setScore  = (id,side,val) => setLocalScores(p=>({...p,[id]:{...p[id],[side]:val}}));
   const setSpread = (id,val)      => setLocalSpreads(p=>({...p,[id]:val}));
   const setNG     = (k,v)         => setNewGame(p=>({...p,[k]:v}));
   const rsVal = roundStatus[adminRound]||"open";
