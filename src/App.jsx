@@ -555,7 +555,12 @@ function PicksView({ user, appData, onWageredChange }) {
       )}
       <div className="games-grid">
         {games.length===0 && <div className="empty-state">No games scheduled for this round yet.</div>}
-        {games.map(game => {
+        {[...games].sort((a,b) => {
+          if (!a.tipoff && !b.tipoff) return 0;
+          if (!a.tipoff) return 1;
+          if (!b.tipoff) return -1;
+          return new Date(a.tipoff) - new Date(b.tipoff);
+        }).map(game => {
           const myPick = picks.find(p=>p.game_id===game.id);
           return <GameCard key={game.id} game={game} myPick={myPick}
             locked={roundLocked||isGameLocked(game)} gameLocked={isGameLocked(game)}
@@ -617,6 +622,11 @@ function GameCard({ game, myPick, locked, gameLocked, startingPoints, totalWager
           <span className="spread-label">SPREAD</span>
           <span className="spread-val">{spreadDisplay}</span>
           <span className="at-sign">@</span>
+          {game.tipoff && game.status !== "final" && (
+            <span style={{fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)', textAlign:'center', lineHeight:1.4}}>
+              {formatCT(game.tipoff)}
+            </span>
+          )}
           {game.status==="final" && <span className="score-final">FINAL</span>}
         </div>
         <div className="team team-home">
