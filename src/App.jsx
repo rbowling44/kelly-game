@@ -364,7 +364,6 @@ function AuthScreen({ onLogin }) {
   const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [name, setName] = useState("");
   const [forgotEmail, setForgotEmail] = useState("");
   const [error, setError] = useState(""); const [info, setInfo] = useState(""); const [busy, setBusy] = useState(false);
-
   const submit = async () => {
     setError(""); setBusy(true);
     if (!email || !password) { setError("Email and password required."); setBusy(false); return; }
@@ -408,6 +407,41 @@ function AuthScreen({ onLogin }) {
     </div></div>
   );
 
+  if (mode === "rules") return (
+    <div className="auth-wrap" style={{alignItems:'flex-start', paddingTop:32}}>
+      <div style={{width:'100%', maxWidth:640}}>
+        <div style={{background:'var(--hardwood)', border:'1px solid var(--kelly)', padding:'20px 28px', marginBottom:16, display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+          <div style={{fontFamily:'Bebas Neue,sans-serif', fontSize:28, letterSpacing:3, color:'var(--kelly)'}}>THE KELLY GAME · RULES</div>
+          <button className="btn btn-ghost btn-sm" onClick={()=>setMode("login")}>← BACK TO LOGIN</button>
+        </div>
+        <div style={{background:'rgba(77,189,92,0.06)', border:'1px solid rgba(77,189,92,0.2)', padding:20, marginBottom:16, fontFamily:'DM Mono,monospace', fontSize:12, color:'var(--chalk-dim)', lineHeight:1.9}}>
+          <div style={{fontFamily:'Bebas Neue,sans-serif', fontSize:18, letterSpacing:2, color:'var(--kelly)', marginBottom:12}}>THE SHORT VERSION</div>
+          {[
+            "1. Every player starts with the same number of points — your bankroll for the game.",
+            "2. Each round, pick teams against the point spread and wager your points.",
+            "3. Win a pick → earn points equal to your wager. Lose → lose them.",
+            "4. Your winnings carry forward — your point total becomes your starting balance next round.",
+            "5. You must wager at least 50% of your points each round or forfeit the remainder.",
+            "6. The player with the most points after the Championship wins. 🏆",
+          ].map((r,i) => <div key={i} style={{marginBottom:4}}>{r}</div>)}
+        </div>
+        {[
+          ["PICKING AGAINST THE SPREAD", "Every game has a point spread. The favorite must win by more than the spread to cover. The underdog just needs to keep it close or win outright. Example: if Duke is -8.5, they must win by 9+. If you pick Vermont +8.5, Vermont just needs to lose by 8 or fewer."],
+          ["THE 50% RULE", "You MUST wager at least 50% of your starting points each round across your picks. If you start with 500 pts, you must wager at least 250. Fail to meet the minimum and your unwagered balance is forfeited for that round."],
+          ["PICKS LOCK AT TIP-OFF", "Once a game tips off, picks for that game close — no changes allowed. Make sure you get your picks in early. The commissioner may also lock the round manually before the first tip."],
+          ["WIN / LOSE / PUSH", "Win your pick → +wager pts. Lose → -wager pts. If the game lands exactly on the spread (a push) → wager returned, no gain or loss."],
+          ["QUESTIONS?", "Use the ✉ MSG COMMISSIONER button after logging in to reach the commissioner directly. They have final say on all disputes and scoring corrections."],
+        ].map(([title, body]) => (
+          <div key={title} style={{background:'var(--hardwood)', border:'1px solid var(--line)', marginBottom:8, padding:'14px 20px'}}>
+            <div style={{fontFamily:'Bebas Neue,sans-serif', fontSize:16, letterSpacing:2, color:'var(--chalk)', marginBottom:6}}>{title}</div>
+            <div style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'var(--chalk-dim)', lineHeight:1.8}}>{body}</div>
+          </div>
+        ))}
+        <button className="btn btn-kelly btn-full" style={{marginTop:8}} onClick={()=>setMode("login")}>← BACK TO LOGIN</button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="auth-wrap"><div className="auth-card">
       <div className="auth-title">THE KELLY GAME</div><div className="auth-sub">NCAA TOURNAMENT · SPREAD GAME</div>
@@ -419,6 +453,12 @@ function AuthScreen({ onLogin }) {
       {mode==="login" && <div style={{textAlign:'center',marginTop:10}}><button style={{background:'none',border:'none',color:'var(--chalk-dim)',cursor:'pointer',fontFamily:'DM Mono,monospace',fontSize:11,textDecoration:'underline'}} onClick={()=>{ setMode("forgot"); setError(""); }}>Forgot password?</button></div>}
       <div className="auth-switch">
         {mode==="login" ? <>New player? <button onClick={()=>setMode("register")}>Create account</button></> : <>Already playing? <button onClick={()=>setMode("login")}>Sign in</button></>}
+      </div>
+      {/* Rules link */}
+      <div style={{textAlign:'center', marginTop:20, paddingTop:16, borderTop:'1px solid var(--line)'}}>
+        <button onClick={()=>setMode("rules")} style={{background:'none', border:'none', color:'var(--kelly)', cursor:'pointer', fontFamily:'DM Mono,monospace', fontSize:11, letterSpacing:1, textDecoration:'underline'}}>
+          📋 READ THE RULES BEFORE SIGNING UP
+        </button>
       </div>
     </div></div>
   );
@@ -1648,11 +1688,20 @@ function RulesView({ user, appData }) {
 
       {/* Quick summary card */}
       <div style={{background:'rgba(77,189,92,0.06)', border:'1px solid rgba(77,189,92,0.2)',
-        padding:20, marginBottom:24, fontFamily:'DM Mono,monospace', fontSize:12, color:'var(--chalk-dim)', lineHeight:2}}>
-        <div style={{fontFamily:'Bebas Neue,sans-serif', fontSize:18, letterSpacing:2, color:'var(--kelly)', marginBottom:8}}>THE SHORT VERSION</div>
-        You start with <Gold>{startingPoints} points</Gold>. Each round, pick teams against the spread and wager your points. Win a pick → earn points. Lose → lose points.
-        You must wager at least <Red>50% of your points</Red> each round or forfeit the rest.
-        The player with the <Highlight>most points</Highlight> at the end of the tournament wins.
+        padding:20, marginBottom:24, fontFamily:'DM Mono,monospace', fontSize:12, color:'var(--chalk-dim)', lineHeight:1.9}}>
+        <div style={{fontFamily:'Bebas Neue,sans-serif', fontSize:18, letterSpacing:2, color:'var(--kelly)', marginBottom:12}}>THE SHORT VERSION</div>
+        <div style={{display:'flex', flexDirection:'column', gap:6}}>
+          {[
+            <span>1. You start with <Gold>{startingPoints} points</Gold> — your bankroll for the game.</span>,
+            <span>2. Each round, pick teams against the spread and wager your points.</span>,
+            <span>3. <Highlight>Win a pick</Highlight> → earn points equal to your wager. <Red>Lose</Red> → lose them.</span>,
+            <span>4. Your <Gold>winnings carry forward</Gold> — your point total from this round becomes your starting balance for the next round.</span>,
+            <span>5. You must wager at least <Red>50% of your points</Red> each round or forfeit the remainder.</span>,
+            <span>6. The player with the <Highlight>most points</Highlight> after the Championship wins. 🏆</span>,
+          ].map((item, i) => (
+            <div key={i} style={{display:'flex', gap:8}}>{item}</div>
+          ))}
+        </div>
       </div>
 
       <Rule num="1" title="STARTING POINTS">
