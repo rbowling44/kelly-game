@@ -1419,6 +1419,7 @@ function WagerLogView() {
   const [users, setUsers]       = useState([]);
   const [filterPlayer, setFilterPlayer] = useState("all");
   const [filterRound,  setFilterRound]  = useState("all");
+  const [sortBy, setSortBy]     = useState("round_player"); // round_player | player_round | wager_desc | wager_asc | result | submitted
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1432,7 +1433,6 @@ function WagerLogView() {
     const u    = users.find(u=>u.email===pick.email);
     if (!game||!u) return null;
     const {won,push} = game.status==="final" ? calcResult(game,pick.side) : {won:false,push:false};
-    // Calculate the spread from the picked team's perspective
     const rawSpread = Number(game.spread);
     const pickedAway = pick.side === 'away';
     const pickedSpread = pickedAway ? rawSpread : -rawSpread;
@@ -1447,10 +1447,19 @@ function WagerLogView() {
       result:game.status==="final"?(push?'PUSH':won?'WIN':'LOSS'):'PENDING' };
   }).filter(Boolean);
 
+  const sortFns = {
+    round_player:  (a,b) => a.round-b.round  || a.name.localeCompare(b.name),
+    player_round:  (a,b) => a.name.localeCompare(b.name) || a.round-b.round,
+    wager_desc:    (a,b) => b.wager-a.wager,
+    wager_asc:     (a,b) => a.wager-b.wager,
+    result:        (a,b) => a.result.localeCompare(b.result),
+    submitted:     (a,b) => new Date(a.submittedAt)-new Date(b.submittedAt),
+  };
+
   const filtered = wagers
     .filter(w=>filterPlayer==="all"||w.email===filterPlayer)
     .filter(w=>filterRound==="all"||w.round===parseInt(filterRound))
-    .sort((a,b)=>a.round-b.round||a.name.localeCompare(b.name));
+    .sort(sortFns[sortBy] || sortFns.round_player);
 
   const totalWagered = filtered.reduce((s,w)=>s+w.wager,0);
   const wins   = filtered.filter(w=>w.result==='WIN').length;
@@ -1470,6 +1479,16 @@ function WagerLogView() {
           <select value={filterRound} onChange={e=>setFilterRound(e.target.value)}>
             <option value="all">All Rounds</option>
             {ROUNDS.map(r=><option key={r.num} value={r.num}>{r.name}</option>)}
+          </select>
+        </div>
+        <div className="field" style={{marginBottom:0}}><label>SORT BY</label>
+          <select value={sortBy} onChange={e=>setSortBy(e.target.value)}>
+            <option value="round_player">Round → Player</option>
+            <option value="player_round">Player → Round</option>
+            <option value="wager_desc">Wager (Highest First)</option>
+            <option value="wager_asc">Wager (Lowest First)</option>
+            <option value="result">Result (W/L/Push)</option>
+            <option value="submitted">Time Submitted</option>
           </select>
         </div>
         <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)',paddingBottom:8}}>
@@ -1509,21 +1528,60 @@ function WagerLogView() {
 function NotificationsView({ onRefresh }) {
   const [notes, setNotes]       = useState([]);
   const [loading, setLoading]   = useState(true);
-  const [replyingTo, setReplyingTo] = useState(null); // note id being replied to
+  const [replyingTo, setReplyingTo] = useState(null);
   const [replyMsg, setReplyMsg] = useState("");
   const [replying, setReplying] = useState(false);
+  const [showCompose, setShowCompose] = useState(false);
+  const [composeMsg, setComposeMsg]   = useState("");
+  const [composeTo, setComposeTo]     = useState("all"); // "all" or email
+  const [allPlayers, setAllPlayers]   = useState([]);
+  const [sending, setSending]         = useState(false);
+  const [composeFlash, setComposeFlash] = useState("");
 
-  useEffect(() => { DB.getNotifications().then(n=>{ setNotes(n); setLoading(false); }); }, []);
+  useEffect(() => {
+    DB.getNotifications().then(n=>{ setNotes(n); setLoading(false); });
+    DB.getAllUsers().then(u => setAllPlayers(u.filter(x=>!x.is_admin)));
+  }, []);
 
   const markRead    = async (id) => { await DB.updateNotification(id,{read:true}); setNotes(p=>p.map(n=>n.id===id?{...n,read:true}:n)); onRefresh(); };
   const markAllRead = async ()   => { await Promise.all(notes.filter(n=>!n.read).map(n=>DB.updateNotification(n.id,{read:true}))); setNotes(p=>p.map(n=>({...n,read:true}))); onRefresh(); };
   const deleteNote  = async (id) => { await DB.deleteNotification(id); setNotes(p=>p.filter(n=>n.id!==id)); };
   const clearAll    = async ()   => { await DB.clearNotifications(); setNotes([]); };
 
+  const sendBroadcast = async () => {
+    if (!composeMsg.trim()) return;
+    setSending(true);
+    if (composeTo === "all") {
+      // Send to every player
+      await Promise.all(allPlayers.map(u => DB.addNotification({
+        type: 'commissioner_reply',
+        email: u.email,
+        name: 'Commissioner',
+        message: `📣 Commissioner: "${composeMsg.trim()}"`,
+        reply_to_email: u.email,
+        read: false,
+      })));
+      setComposeFlash(`✓ Broadcast sent to all ${allPlayers.length} players.`);
+    } else {
+      const u = allPlayers.find(p=>p.email===composeTo);
+      await DB.addNotification({
+        type: 'commissioner_reply',
+        email: composeTo,
+        name: 'Commissioner',
+        message: `Commissioner to ${u?.name}: "${composeMsg.trim()}"`,
+        reply_to_email: composeTo,
+        read: false,
+      });
+      setComposeFlash(`✓ Message sent to ${u?.name}.`);
+    }
+    setComposeMsg("");
+    setSending(false);
+    setTimeout(()=>setComposeFlash(""), 3000);
+  };
+
   const sendReply = async (note) => {
     if (!replyMsg.trim()) return;
     setReplying(true);
-    // Store reply as a special notification the player will see
     await DB.addNotification({
       type: 'commissioner_reply',
       email: note.email,
@@ -1532,7 +1590,6 @@ function NotificationsView({ onRefresh }) {
       reply_to_email: note.email,
       read: false,
     });
-    // Mark original as read
     await DB.updateNotification(note.id, { read: true, replied: true });
     setNotes(p => p.map(n => n.id===note.id ? {...n, read:true, replied:true} : n));
     setReplyingTo(null);
@@ -1564,10 +1621,42 @@ function NotificationsView({ onRefresh }) {
       <div className="round-banner">
         <div><div className="round-name">NOTIFICATIONS</div><div className="round-dates">{unreadCount} unread · {notes.length} total</div></div>
         <div style={{display:'flex',gap:8}}>
+          <button className="btn btn-kelly btn-sm" onClick={()=>setShowCompose(v=>!v)}>
+            {showCompose ? '✕ CANCEL' : '📣 SEND MESSAGE'}
+          </button>
           {unreadCount>0 && <button className="btn btn-ghost btn-sm" onClick={markAllRead}>MARK ALL READ</button>}
           {notes.length>0 && <button className="btn btn-ghost btn-sm" style={{color:'var(--red)',borderColor:'rgba(231,76,60,0.3)'}} onClick={clearAll}>CLEAR ALL</button>}
         </div>
       </div>
+
+      {/* Compose Panel */}
+      {showCompose && (
+        <div style={{background:'rgba(77,189,92,0.06)', border:'1px solid rgba(77,189,92,0.25)', padding:20, marginBottom:16}}>
+          <div style={{fontFamily:'Bebas Neue,sans-serif', fontSize:20, letterSpacing:2, color:'var(--kelly)', marginBottom:14}}>SEND MESSAGE TO PLAYERS</div>
+          {composeFlash && <div className="success-msg" style={{marginBottom:12}}>{composeFlash}</div>}
+          <div style={{display:'flex', gap:12, marginBottom:12, flexWrap:'wrap'}}>
+            <div className="field" style={{marginBottom:0, flex:1, minWidth:200}}>
+              <label>SEND TO</label>
+              <select value={composeTo} onChange={e=>setComposeTo(e.target.value)}>
+                <option value="all">📣 All Players ({allPlayers.length})</option>
+                {allPlayers.map(u=><option key={u.email} value={u.email}>{u.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <textarea value={composeMsg} onChange={e=>setComposeMsg(e.target.value)}
+            placeholder="Type your message to players..."
+            style={{width:'100%', background:'rgba(255,255,255,0.05)', border:'1px solid var(--line)', color:'var(--chalk)',
+              padding:12, fontFamily:'DM Mono,monospace', fontSize:13, outline:'none', resize:'vertical', minHeight:80, marginBottom:12}} />
+          <div style={{display:'flex', gap:10, alignItems:'center'}}>
+            <button className="btn btn-kelly" onClick={sendBroadcast} disabled={sending||!composeMsg.trim()}>
+              {sending ? 'SENDING...' : composeTo==='all' ? `📣 BROADCAST TO ALL ${allPlayers.length} PLAYERS` : '✉ SEND TO PLAYER'}
+            </button>
+            <span style={{fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)'}}>
+              Players will see this in their ✉ MSG COMMISSIONER inbox.
+            </span>
+          </div>
+        </div>
+      )}
       {loading && <div className="empty-state">Loading...</div>}
       {!loading && notes.length===0 && <div className="empty-state">No notifications yet.</div>}
       <div style={{display:'flex',flexDirection:'column',gap:8}}>
