@@ -2,10 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from './lib/supabaseClient.js';
 import { GolfModeProvider, useGolfMode } from './contexts/GolfModeContext.jsx';
 import GolfModeToggle from './components/admin/GolfModeToggle.jsx';
-import GolfModeAdmin from './components/admin/GolfModeAdmin.jsx';
-import OddsManager from './components/admin/OddsManager.jsx';
-import SettleRound from './components/admin/SettleRound.jsx';
-import LeaderboardSync from './components/admin/LeaderboardSync.jsx';
+import GolfRoundTracker from './components/admin/GolfRoundTracker.jsx';
 import PicksGolf from './components/golf/Picks.jsx';
 import LeaderboardGolf from './components/golf/Leaderboard.jsx';
 import WagerLogGolf from './components/golf/WagerLog.jsx';
@@ -422,7 +419,7 @@ function AppInner() {
         {tab==='waglog'        && !liveUser.is_admin && (mode==='golf' ? <WagerLogGolf tournamentId={golfTournamentId} /> : <PlayerWagerLogView />)}
         {tab==='rules'         && !liveUser.is_admin && (mode==='golf' ? <RulesGolf /> : <RulesView         user={liveUser} appData={appData} />)}
         {tab==='admin'         &&  liveUser.is_admin && <AdminView         appData={appData} onRefresh={loadAppData} />}
-        {tab==='tracker'       &&  liveUser.is_admin && <RoundTrackerView  appData={appData} />}
+        {tab==='tracker'       &&  liveUser.is_admin && (mode==='golf' ? <GolfRoundTracker tournamentId={golfTournamentId} /> : <RoundTrackerView  appData={appData} />)}
         {tab==='wagers'        &&  liveUser.is_admin && <WagerLogView />}
         {tab==='notifications' &&  liveUser.is_admin && <NotificationsView onRefresh={refreshUnread} />}
       </main>

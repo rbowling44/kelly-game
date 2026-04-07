@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer, getPlayerBankrollsForRound, getWagersForRound } from '../../lib/supabaseGolf.js';
+import { addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer, getPlayerBankrollsForRound } from '../../lib/supabaseGolf.js';
 import { supabase } from '../../lib/supabaseClient.js';
 
 export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
@@ -14,7 +14,6 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
   const [selectedRound, setSelectedRound] = useState(activeKellyRound);
   
   const [players, setPlayers] = useState([]);
-  const [wagers, setWagers] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -24,14 +23,12 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
     try {
       setLoading(true);
       setError('');
-      const [g, p, w] = await Promise.all([
+      const [g, p] = await Promise.all([
         getGolfers(tournamentId),
-        getPlayerBankrollsForRound(tournamentId, selectedRound),
-        getWagersForRound(tournamentId, selectedRound)
+        getPlayerBankrollsForRound(tournamentId, selectedRound)
       ]);
       setGolfers(g);
       setPlayers(p);
-      setWagers(w);
       // Load odds for all golfers
       const odds = {};
       for (const golfer of g) {
@@ -439,7 +436,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
 
       {/* ========================= PLAYER LIST ========================= */}
       <div style={STYLES.section}>
-        <div style={STYLES.title}>PLAYER LIST - KELLY ROUND {selectedRound}</div>
+        <div style={STYLES.title}>PLAYER LIST</div>
         <div style={{ overflowX: 'auto' }}>
           <table style={STYLES.table}>
             <thead>
@@ -464,53 +461,6 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
                       {p.points_remaining}
                     </td>
                     <td style={STYLES.td}>{p.wager_count}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ========================= WAGER LOG ========================= */}
-      <div style={STYLES.section}>
-        <div style={STYLES.title}>WAGER LOG - KELLY ROUND {selectedRound}</div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={STYLES.table}>
-            <thead>
-              <tr style={{ background: 'rgba(0,0,0,0.3)' }}>
-                <th style={STYLES.th}>PLAYER</th>
-                <th style={STYLES.th}>GOLFER</th>
-                <th style={STYLES.th}>CATEGORY</th>
-                <th style={STYLES.th}>WAGERED</th>
-                <th style={STYLES.th}>ODDS</th>
-                <th style={STYLES.th}>RESULT</th>
-                <th style={STYLES.th}>WON</th>
-              </tr>
-            </thead>
-            <tbody>
-              {wagers.length === 0 ? (
-                <tr><td style={STYLES.td} colSpan="7">No wagers yet</td></tr>
-              ) : (
-                wagers.map(w => (
-                  <tr key={w.id}>
-                    <td style={STYLES.td}>{w.player_name}</td>
-                    <td style={STYLES.td}>{w.golf_golfers?.name || 'Unknown'}</td>
-                    <td style={STYLES.td}>{w.category.toUpperCase()}</td>
-                    <td style={STYLES.td}>{w.points_wagered}</td>
-                    <td style={STYLES.td}>{w.odds_at_time}</td>
-                    <td style={{
-                      ...STYLES.td,
-                      color: w.result === 'won' ? 'var(--green)' : w.result === 'lost' ? 'var(--red)' : 'var(--chalk-dim)'
-                    }}>
-                      {w.result.toUpperCase()}
-                    </td>
-                    <td style={{
-                      ...STYLES.td,
-                      color: w.points_won > 0 ? 'var(--green)' : 'var(--chalk-dim)'
-                    }}>
-                      {w.points_won || 0}
-                    </td>
                   </tr>
                 ))
               )}
