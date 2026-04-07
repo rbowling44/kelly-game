@@ -1,13 +1,19 @@
 import { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from './lib/supabaseClient.js';
+import { GolfModeProvider, useGolfMode } from './contexts/GolfModeContext.jsx';
+import GolfModeToggle from './components/admin/GolfModeToggle.jsx';
+import OddsManager from './components/admin/OddsManager.jsx';
+import SettleRound from './components/admin/SettleRound.jsx';
+import LeaderboardSync from './components/admin/LeaderboardSync.jsx';
+import PicksGolf from './components/golf/Picks.jsx';
+import LeaderboardGolf from './components/golf/Leaderboard.jsx';
+import WagerLogGolf from './components/golf/WagerLog.jsx';
+import HistoryGolf from './components/golf/History.jsx';
+import RulesGolf from './components/golf/Rules.jsx';
 
 // ============================================================
 // SUPABASE CLIENT
 // ============================================================
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-);
 
 // ============================================================
 // DESIGN: The Kelly Game
@@ -167,6 +173,14 @@ function isGameLocked(game) {
   return new Date() >= new Date(game.tipoff);
 }
 
+export default function App() {
+  return (
+    <GolfModeProvider>
+      <AppInner />
+    </GolfModeProvider>
+  );
+}
+
 function calcResult(game, side) {
   if (game.away_score === null || game.home_score === null) return { won: false, push: false };
   const awayFinal = Number(game.away_score) + Number(game.spread);
@@ -246,18 +260,24 @@ const DB = {
     await supabase.from('settings').upsert({ key: 'round_status', value: { 1: 'open' } });
     await supabase.from('settings').upsert({ key: 'tournament_complete', value: 'false' });
   },
+  async getGolfTournaments() { const { data } = await supabase.from('golf_tournaments').select('*').order('created_at',{ascending:false}); return data || []; },
+  async createGolfTournament(t) { const { data, error } = await supabase.from('golf_tournaments').insert(t).select().single(); if (error) throw error; return data; },
+  async setActiveGolfTournament(id) { await supabase.from('settings').upsert({ key: 'active_golf_tournament_id', value: id?.toString() }); },
+  async getActiveGolfTournamentId() { const v = await DB.getSetting('active_golf_tournament_id'); return v ? parseInt(v) : null; },
 };
 
 // ============================================================
 // APP
 // ============================================================
-export default function App() {
+function AppInner() {
   const [user, setUser]         = useState(null);
   const [tab, setTab]           = useState("picks");
   const [loading, setLoading]   = useState(true);
   const [appData, setAppData]   = useState({ currentRound:1, startingPoints:100, roundStatus:{} });
   const [unread, setUnread]     = useState(0);
   const [liveWagered, setLiveWagered] = useState(0);
+  const [golfTournamentId, setGolfTournamentId] = useState(null);
+  const { mode, setMode } = useGolfMode();
 
   useEffect(() => {
     const style = document.createElement('style');
@@ -280,9 +300,32 @@ export default function App() {
     return () => document.head.removeChild(style);
   }, []);
 
+  useEffect(() => {
+    const routeMap = {
+      '/picks': 'picks',
+      '/leaderboard': 'board',
+      '/history': 'history',
+      '/wager-log': 'waglog',
+      '/rules': 'rules',
+      '/admin': 'admin',
+      '/admin/tracker': 'tracker',
+      '/admin/wagers': 'wagers',
+      '/admin/notifications': 'notifications',
+    };
+    const path = window.location.pathname.replace(/\/$/, '') || '/picks';
+    setTab(routeMap[path] || 'picks');
+    window.onpopstate = () => {
+      const newPath = window.location.pathname.replace(/\/$/, '') || '/picks';
+      setTab(routeMap[newPath] || 'picks');
+    };
+    return () => { window.onpopstate = null; };
+  }, []);
+
   const loadAppData = async () => {
-    const [cr, sp, rs, tc, rl] = await Promise.all([DB.currentRound(), DB.startingPoints(), DB.roundStatus(), DB.getSetting('tournament_complete'), DB.registrationLocked()]);
+    const [cr, sp, rs, tc, rl, appMode, activeGolfTournamentId] = await Promise.all([DB.currentRound(), DB.startingPoints(), DB.roundStatus(), DB.getSetting('tournament_complete'), DB.registrationLocked(), DB.getSetting('app_mode'), DB.getActiveGolfTournamentId()]);
     setAppData({ currentRound:cr, startingPoints:sp, roundStatus:rs, tournamentComplete: tc === 'true', registrationLocked: rl });
+    if (appMode) setMode(appMode);
+    if (activeGolfTournamentId) setGolfTournamentId(activeGolfTournamentId);
     // Also refresh current user from DB so points are always fresh
     const saved = sessionStorage.getItem('kelly_session');
     if (saved) {
@@ -299,6 +342,23 @@ export default function App() {
   const refreshUnread = async () => {
     const n = await DB.getNotifications();
     setUnread(n.filter(x=>!x.read).length);
+  };
+
+  const navigate = (target) => {
+    const tabToPath = {
+      picks: '/picks',
+      board: '/leaderboard',
+      history: '/history',
+      waglog: '/wager-log',
+      rules: '/rules',
+      admin: '/admin',
+      tracker: '/admin/tracker',
+      wagers: '/admin/wagers',
+      notifications: '/admin/notifications',
+    };
+    setTab(target);
+    const path = tabToPath[target] || '/picks';
+    window.history.pushState({}, '', path);
   };
 
   useEffect(() => { if (user?.is_admin) refreshUnread(); }, [user]);
@@ -322,7 +382,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="header">
-        <div className="logo">THE KELLY<span> GAME</span></div>
+        <div className="logo">{mode === 'golf' ? 'THE MASTERS KELLY GAME' : <>THE KELLY<span> GAME</span></>}</div>
         <div className="header-right">
           <span className="header-user">{liveUser.name}</span>
           {!liveUser.is_admin && <span className="header-points">{pts} PTS</span>}
@@ -338,28 +398,28 @@ export default function App() {
         </div>
       </header>
       <nav className="nav">
-        {!liveUser.is_admin && <button className={`nav-tab ${tab==='picks'?'active':''}`}   onClick={()=>setTab('picks')}>MY PICKS</button>}
-        <button                   className={`nav-tab ${tab==='board'?'active':''}`}    onClick={()=>{ setTab('board'); setLiveWagered(0); }}>LEADERBOARD</button>
-        {!liveUser.is_admin && <button className={`nav-tab ${tab==='history'?'active':''}`} onClick={()=>{ setTab('history'); setLiveWagered(0); }}>HISTORY</button>}
-        {!liveUser.is_admin && <button className={`nav-tab ${tab==='waglog'?'active':''}`}  onClick={()=>{ setTab('waglog'); setLiveWagered(0); }}>WAGER LOG</button>}
-        {!liveUser.is_admin && <button className={`nav-tab ${tab==='rules'?'active':''}`}   onClick={()=>{ setTab('rules'); setLiveWagered(0); }}>RULES</button>}
-        {liveUser.is_admin  && <button className={`nav-tab ${tab==='admin'?'active':''}`}   onClick={()=>setTab('admin')}>ADMIN</button>}
-        {liveUser.is_admin  && <button className={`nav-tab ${tab==='tracker'?'active':''}`} onClick={()=>setTab('tracker')}>ROUND TRACKER</button>}
-        {liveUser.is_admin  && <button className={`nav-tab ${tab==='wagers'?'active':''}`}  onClick={()=>setTab('wagers')}>WAGER LOG</button>}
+        {!liveUser.is_admin && <button className={`nav-tab ${tab==='picks'?'active':''}`}   onClick={()=>navigate('picks')}>{mode==='golf'?'PICKS':'MY PICKS'}</button>}
+        <button                   className={`nav-tab ${tab==='board'?'active':''}`}    onClick={()=>{ navigate('board'); setLiveWagered(0); }}>LEADERBOARD</button>
+        {!liveUser.is_admin && <button className={`nav-tab ${tab==='history'?'active':''}`} onClick={()=>{ navigate('history'); setLiveWagered(0); }}>{mode==='golf'?'HISTORY':'HISTORY'}</button>}
+        {!liveUser.is_admin && <button className={`nav-tab ${tab==='waglog'?'active':''}`}  onClick={()=>{ navigate('waglog'); setLiveWagered(0); }}>{mode==='golf'?'WAGER LOG':'WAGER LOG'}</button>}
+        {!liveUser.is_admin && <button className={`nav-tab ${tab==='rules'?'active':''}`}   onClick={()=>{ navigate('rules'); setLiveWagered(0); }}>{mode==='golf'?'RULES':'RULES'}</button>}
+        {liveUser.is_admin  && <button className={`nav-tab ${tab==='admin'?'active':''}`}   onClick={()=>navigate('admin')}>ADMIN</button>}
+        {liveUser.is_admin  && <button className={`nav-tab ${tab==='tracker'?'active':''}`} onClick={()=>navigate('tracker')}>ROUND TRACKER</button>}
+        {liveUser.is_admin  && <button className={`nav-tab ${tab==='wagers'?'active':''}`}  onClick={()=>navigate('wagers')}>WAGER LOG</button>}
         {liveUser.is_admin  && (
           <button className={`nav-tab ${tab==='notifications'?'active':''}`}
-            onClick={()=>{ setTab('notifications'); refreshUnread(); }} style={{position:'relative'}}>
+            onClick={()=>{ navigate('notifications'); refreshUnread(); }} style={{position:'relative'}}>
             NOTIFICATIONS
             {unread>0 && <span style={{position:'absolute',top:6,right:4,background:'var(--red)',color:'#fff',borderRadius:'50%',width:16,height:16,fontSize:10,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'DM Mono,monospace'}}>{unread}</span>}
           </button>
         )}
       </nav>
       <main className="main">
-        {tab==='picks'         && !liveUser.is_admin && <PicksView         user={liveUser} appData={appData} onWageredChange={setLiveWagered} onUserUpdate={(u)=>{ setUser(u); sessionStorage.setItem('kelly_session',JSON.stringify(u)); }} />}
-        {tab==='board'         &&                      <LeaderboardView   currentEmail={liveUser.email} appData={appData} />}
-        {tab==='history'       && !liveUser.is_admin && <HistoryView       user={liveUser} />}
-        {tab==='waglog'        && !liveUser.is_admin && <PlayerWagerLogView />}
-        {tab==='rules'         && !liveUser.is_admin && <RulesView         user={liveUser} appData={appData} />}
+        {tab==='picks'         && !liveUser.is_admin && (mode==='golf' ? <PicksGolf user={liveUser} tournamentId={golfTournamentId} /> : <PicksView         user={liveUser} appData={appData} onWageredChange={setLiveWagered} onUserUpdate={(u)=>{ setUser(u); sessionStorage.setItem('kelly_session',JSON.stringify(u)); }} />)}
+        {tab==='board'         &&                      (mode==='golf' ? <LeaderboardGolf tournamentId={golfTournamentId} /> : <LeaderboardView   currentEmail={liveUser.email} appData={appData} />)}
+        {tab==='history'       && !liveUser.is_admin && (mode==='golf' ? <HistoryGolf /> : <HistoryView       user={liveUser} />)}
+        {tab==='waglog'        && !liveUser.is_admin && (mode==='golf' ? <WagerLogGolf tournamentId={golfTournamentId} /> : <PlayerWagerLogView />)}
+        {tab==='rules'         && !liveUser.is_admin && (mode==='golf' ? <RulesGolf /> : <RulesView         user={liveUser} appData={appData} />)}
         {tab==='admin'         &&  liveUser.is_admin && <AdminView         appData={appData} onRefresh={loadAppData} />}
         {tab==='tracker'       &&  liveUser.is_admin && <RoundTrackerView  appData={appData} />}
         {tab==='wagers'        &&  liveUser.is_admin && <WagerLogView />}
@@ -867,6 +927,7 @@ function HistoryView({ user }) {
 // ADMIN VIEW
 // ============================================================
 function AdminView({ appData, onRefresh }) {
+  const { mode } = useGolfMode();
   const { currentRound: activeRound } = appData;
   const [adminRound, setAdminRound] = useState(activeRound);
   const [games, setGames]           = useState([]);
@@ -876,9 +937,36 @@ function AdminView({ appData, onRefresh }) {
   const [localSpreads, setLocalSpreads] = useState({});
   const [newGame, setNewGame]     = useState(BLANK_GAME);
   const [showAdd, setShowAdd]     = useState(false);
+  const [golfTournaments, setGolfTournaments] = useState([]);
+  const [selectedGolfTournamentId, setSelectedGolfTournamentId] = useState(null);
 
   useEffect(() => { loadGames(adminRound); }, [adminRound]);
   useEffect(() => { setRoundStatus(appData.roundStatus || {}); }, [appData.roundStatus]);
+  useEffect(() => { if (mode === 'golf') loadGolfTournaments(); }, [mode]);
+
+  const loadGolfTournaments = async () => {
+    const t = await DB.getGolfTournaments();
+    setGolfTournaments(t);
+    const activeId = await DB.getActiveGolfTournamentId();
+    setSelectedGolfTournamentId(activeId || (t[0]?.id ?? null));
+  };
+
+  const selectGolfTournament = async (id) => {
+    await DB.setActiveGolfTournament(id);
+    setSelectedGolfTournamentId(id);
+    flash('Active golf tournament updated.');
+  };
+
+  const createGolfTournament = async () => {
+    const name = window.prompt('Tournament name (e.g. The Masters)');
+    const year = window.prompt('Year (e.g. 2026)');
+    if (!name || !year) return;
+    const tg = await DB.createGolfTournament({ name, year: parseInt(year, 10), status: 'upcoming', active_kelly_round: 1, mode: 'masters' });
+    setGolfTournaments(prev => [tg, ...prev]);
+    setSelectedGolfTournamentId(tg.id);
+    await DB.setActiveGolfTournament(tg.id);
+    flash('Created and activated new golf tournament.');
+  };
 
   const loadGames = async (r) => {
     const g = await DB.getGames(r);
@@ -1054,8 +1142,42 @@ function AdminView({ appData, onRefresh }) {
   const setNG     = (k,v)         => setNewGame(p=>({...p,[k]:v}));
   const rsVal = roundStatus[adminRound]||"open";
 
+  if (mode === 'golf') {
+    return (
+      <div>
+        <GolfModeToggle />
+        <div className="round-banner" style={{flexWrap:'wrap',gap:12}}>
+          <div>
+            <div className="round-name">GOLF MODE ADMIN</div>
+            <div className="round-dates">The Masters Kelly Game</div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+            <div style={{fontFamily:'DM Mono,monospace',fontSize:10,color:'var(--chalk-dim)',letterSpacing:1}}>TOURNAMENT</div>
+            <select value={selectedGolfTournamentId || ''} onChange={e=>selectGolfTournament(parseInt(e.target.value,10))}
+              style={{background:'var(--grain)',border:'1px solid var(--line)',color:'var(--chalk)',padding:'6px 10px',fontFamily:'DM Mono,monospace',fontSize:13,outline:'none',cursor:'pointer'}}>
+              <option value="">Select tournament</option>
+              {golfTournaments.map(t => <option key={t.id} value={t.id}>{t.name} {t.year}</option>)}
+            </select>
+            <button className="btn btn-green btn-sm" onClick={createGolfTournament}>+ NEW TOURNAMENT</button>
+          </div>
+        </div>
+        {!selectedGolfTournamentId && (
+          <div className="empty-state">No active golf tournament selected. Create one or choose an existing tournament.</div>
+        )}
+        {selectedGolfTournamentId && (
+          <div>
+            <OddsManager tournamentId={selectedGolfTournamentId} kellyRound={1} />
+            <LeaderboardSync tournamentId={selectedGolfTournamentId} />
+            <SettleRound tournamentId={selectedGolfTournamentId} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div>
+      <GolfModeToggle />
       <div className="round-banner" style={{flexWrap:'wrap',gap:12}}>
         <div>
           <div className="round-name">COMMISSIONER PANEL</div>
