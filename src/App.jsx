@@ -1185,8 +1185,6 @@ function AdminPlayers({ appData, onRefresh }) {
     onRefresh();
   };
 
-  const flash = (t) => { setMsg(t); setTimeout(()=>setMsg(""),3000); };
-
   const saveStartingPoints = async () => {
     const val = parseInt(startPts);
     if (!val||val<1) return flash("Enter a valid number.");
