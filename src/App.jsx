@@ -176,6 +176,16 @@ function calcResult(game, side) {
     : { won: awayFinal < Number(game.home_score), push: false };
 }
 
+// Get a player's best available settled point total
+// Checks: final → round 6 → round 5 → ... → round 1 → globalSP
+function getBestPoints(u, globalSP) {
+  if (u.rounds?.final !== undefined && u.rounds.final !== null) return u.rounds.final;
+  for (let r = 6; r >= 1; r--) {
+    if (u.rounds?.[r] !== undefined && u.rounds[r] !== null) return u.rounds[r];
+  }
+  return globalSP;
+}
+
 function formatCT(ts) {
   if (!ts) return "—";
   try {
@@ -195,6 +205,7 @@ const DB = {
   async currentRound()        { return parseInt(await DB.getSetting('current_round'))  || 1; },
   async startingPoints()      { return parseInt(await DB.getSetting('starting_points')) || 100; },
   async roundStatus()         { return (await DB.getSetting('round_status')) || {}; },
+  async registrationLocked()  { return (await DB.getSetting('registration_locked')) === 'true'; },
 
   async getUser(email)  { const {data} = await supabase.from('users').select('*').eq('email',email.toLowerCase()).single(); return data; },
   async getAllUsers()    { const {data} = await supabase.from('users').select('*'); return data||[]; },
@@ -270,8 +281,8 @@ export default function App() {
   }, []);
 
   const loadAppData = async () => {
-    const [cr, sp, rs, tc] = await Promise.all([DB.currentRound(), DB.startingPoints(), DB.roundStatus(), DB.getSetting('tournament_complete')]);
-    setAppData({ currentRound:cr, startingPoints:sp, roundStatus:rs, tournamentComplete: tc === 'true' });
+    const [cr, sp, rs, tc, rl] = await Promise.all([DB.currentRound(), DB.startingPoints(), DB.roundStatus(), DB.getSetting('tournament_complete'), DB.registrationLocked()]);
+    setAppData({ currentRound:cr, startingPoints:sp, roundStatus:rs, tournamentComplete: tc === 'true', registrationLocked: rl });
     // Also refresh current user from DB so points are always fresh
     const saved = sessionStorage.getItem('kelly_session');
     if (saved) {
@@ -300,7 +311,7 @@ export default function App() {
   const logout = () => { setUser(null); sessionStorage.removeItem('kelly_session'); setTab("picks"); };
 
   if (loading) return <div className="loading"><span className="spinner"/>LOADING THE KELLY GAME...</div>;
-  if (!user)   return <AuthScreen onLogin={login} />;
+  if (!user)   return <AuthScreen onLogin={login} registrationLocked={appData.registrationLocked} />;
 
   // Use freshUser points from DB if available via session
   const savedSession = sessionStorage.getItem('kelly_session');
@@ -330,6 +341,7 @@ export default function App() {
         {!liveUser.is_admin && <button className={`nav-tab ${tab==='picks'?'active':''}`}   onClick={()=>setTab('picks')}>MY PICKS</button>}
         <button                   className={`nav-tab ${tab==='board'?'active':''}`}    onClick={()=>{ setTab('board'); setLiveWagered(0); }}>LEADERBOARD</button>
         {!liveUser.is_admin && <button className={`nav-tab ${tab==='history'?'active':''}`} onClick={()=>{ setTab('history'); setLiveWagered(0); }}>HISTORY</button>}
+        {!liveUser.is_admin && <button className={`nav-tab ${tab==='waglog'?'active':''}`}  onClick={()=>{ setTab('waglog'); setLiveWagered(0); }}>WAGER LOG</button>}
         {!liveUser.is_admin && <button className={`nav-tab ${tab==='rules'?'active':''}`}   onClick={()=>{ setTab('rules'); setLiveWagered(0); }}>RULES</button>}
         {liveUser.is_admin  && <button className={`nav-tab ${tab==='admin'?'active':''}`}   onClick={()=>setTab('admin')}>ADMIN</button>}
         {liveUser.is_admin  && <button className={`nav-tab ${tab==='tracker'?'active':''}`} onClick={()=>setTab('tracker')}>ROUND TRACKER</button>}
@@ -346,6 +358,7 @@ export default function App() {
         {tab==='picks'         && !liveUser.is_admin && <PicksView         user={liveUser} appData={appData} onWageredChange={setLiveWagered} onUserUpdate={(u)=>{ setUser(u); sessionStorage.setItem('kelly_session',JSON.stringify(u)); }} />}
         {tab==='board'         &&                      <LeaderboardView   currentEmail={liveUser.email} appData={appData} />}
         {tab==='history'       && !liveUser.is_admin && <HistoryView       user={liveUser} />}
+        {tab==='waglog'        && !liveUser.is_admin && <PlayerWagerLogView />}
         {tab==='rules'         && !liveUser.is_admin && <RulesView         user={liveUser} appData={appData} />}
         {tab==='admin'         &&  liveUser.is_admin && <AdminView         appData={appData} onRefresh={loadAppData} />}
         {tab==='tracker'       &&  liveUser.is_admin && <RoundTrackerView  appData={appData} />}
@@ -359,7 +372,7 @@ export default function App() {
 // ============================================================
 // AUTH
 // ============================================================
-function AuthScreen({ onLogin }) {
+function AuthScreen({ onLogin, registrationLocked }) {
   const [mode, setMode]   = useState("login");
   const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [name, setName] = useState("");
   const [forgotEmail, setForgotEmail] = useState("");
@@ -372,6 +385,7 @@ function AuthScreen({ onLogin }) {
       if (!u || u.password !== btoa(password)) { setError("Invalid credentials."); setBusy(false); return; }
       onLogin(u);
     } else {
+      if (registrationLocked) { setError("Registration is currently closed. Contact the commissioner to join."); setBusy(false); return; }
       if (!name) { setError("Name required."); setBusy(false); return; }
       const existing = await DB.getUser(email);
       if (existing) { setError("Email already registered."); setBusy(false); return; }
@@ -452,7 +466,10 @@ function AuthScreen({ onLogin }) {
       <button className="btn btn-kelly btn-full" onClick={submit} disabled={busy}>{busy?"...":mode==="login"?"SIGN IN":"JOIN THE GAME"}</button>
       {mode==="login" && <div style={{textAlign:'center',marginTop:10}}><button style={{background:'none',border:'none',color:'var(--chalk-dim)',cursor:'pointer',fontFamily:'DM Mono,monospace',fontSize:11,textDecoration:'underline'}} onClick={()=>{ setMode("forgot"); setError(""); }}>Forgot password?</button></div>}
       <div className="auth-switch">
-        {mode==="login" ? <>New player? <button onClick={()=>setMode("register")}>Create account</button></> : <>Already playing? <button onClick={()=>setMode("login")}>Sign in</button></>}
+        {mode==="login"
+          ? !registrationLocked && <>New player? <button onClick={()=>setMode("register")}>Create account</button></>
+          : <>Already playing? <button onClick={()=>setMode("login")}>Sign in</button></>}
+        {mode==="login" && registrationLocked && <span style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)'}}>Registration is currently closed.</span>}
       </div>
       {/* Rules link */}
       <div style={{textAlign:'center', marginTop:20, paddingTop:16, borderTop:'1px solid var(--line)'}}>
@@ -720,21 +737,44 @@ function LeaderboardView({ currentEmail, appData }) {
 
   const load = async () => {
     setLoading(true);
-    const [users, allPicks, allGames] = await Promise.all([DB.getAllUsers(), DB.getAllPicks(), DB.getGames()]);
+    const [users, allPicks, allGames, rs] = await Promise.all([DB.getAllUsers(), DB.getAllPicks(), DB.getGames(), DB.roundStatus()]);
     const built = users.filter(u=>!u.is_admin).map(u => {
       const myPicks = allPicks.filter(p=>p.email===u.email);
-      let totalPoints = u.rounds?.[currentRound] ?? globalSP;
       let totalWins=0, totalLosses=0, totalPushes=0, totalWagered=0;
+
+      // Count cumulative W/L/Push across all picks
       myPicks.forEach(pick => {
         const game = allGames.find(g=>g.id===pick.game_id) || pick.games;
         totalWagered += pick.wager||0;
         if (game?.status==="final") {
           const {won,push} = calcResult(game, pick.side);
           if (push) totalPushes++;
-          else if (won) { totalWins++; if(pick.round===currentRound) totalPoints+=pick.wager; }
-          else          { totalLosses++; if(pick.round===currentRound) totalPoints-=pick.wager; }
+          else if (won) totalWins++;
+          else totalLosses++;
         }
       });
+
+      // For points: use the settled value from user.rounds for past rounds,
+      // and only add/subtract current round's unsettled picks on top
+      const roundStatus = rs || {};
+      const currentRoundSettled = roundStatus[currentRound] === "complete";
+
+      let totalPoints;
+      if (currentRoundSettled) {
+        // Round is complete — use best settled value, no recalculation
+        totalPoints = getBestPoints(u, globalSP);
+      } else {
+        // Round in progress — start from settled balance and add current picks
+        totalPoints = u.rounds?.[currentRound] ?? globalSP;
+        myPicks.filter(p=>p.round===currentRound).forEach(pick => {
+          const game = allGames.find(g=>g.id===pick.game_id) || pick.games;
+          if (game?.status==="final") {
+            const {won,push} = calcResult(game, pick.side);
+            if (!push) totalPoints += won ? pick.wager : -pick.wager;
+          }
+        });
+      }
+
       return { ...u, totalPoints, totalWins, totalLosses, totalPushes, avgWager: myPicks.length>0?Math.round(totalWagered/myPicks.length):0 };
     }).sort((a,b)=>b.totalPoints-a.totalPoints);
     setRows(built); setLoading(false);
@@ -1124,14 +1164,26 @@ function AdminView({ appData, onRefresh }) {
 // ADMIN PLAYERS
 // ============================================================
 function AdminPlayers({ appData, onRefresh }) {
-  const { currentRound, startingPoints: globalSP } = appData;
+  const { currentRound, startingPoints: globalSP, registrationLocked } = appData;
   const [players, setPlayers] = useState([]);
   const [editPts, setEditPts] = useState({});
   const [editPwd, setEditPwd] = useState({});
   const [startPts, setStartPts] = useState(globalSP.toString());
+  const [regLocked, setRegLocked] = useState(!!registrationLocked);
   const [msg, setMsg] = useState("");
 
   useEffect(() => { DB.getAllUsers().then(u=>setPlayers(u.filter(x=>!x.is_admin))); }, []);
+  useEffect(() => { setRegLocked(!!registrationLocked); }, [registrationLocked]);
+
+  const flash = (t) => { setMsg(t); setTimeout(()=>setMsg(""),3000); };
+
+  const toggleRegistration = async () => {
+    const next = !regLocked;
+    await DB.setSetting('registration_locked', next ? 'true' : 'false');
+    setRegLocked(next);
+    flash(next ? '🔒 Registration locked — no new sign-ups allowed.' : '🔓 Registration open — players can sign up.');
+    onRefresh();
+  };
 
   const flash = (t) => { setMsg(t); setTimeout(()=>setMsg(""),3000); };
 
@@ -1201,7 +1253,7 @@ function AdminPlayers({ appData, onRefresh }) {
     <div className="admin-section">
       <div className="admin-title">GAME SETTINGS</div>
       {msg && <div className="success-msg" style={{marginBottom:12}}>{msg}</div>}
-      <div style={{background:'rgba(77,189,92,0.05)',border:'1px solid rgba(77,189,92,0.15)',padding:16,marginBottom:24}}>
+      <div style={{background:'rgba(77,189,92,0.05)',border:'1px solid rgba(77,189,92,0.15)',padding:16,marginBottom:16}}>
         <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)',letterSpacing:1,marginBottom:8}}>STARTING POINTS FOR THE GAME</div>
         <div style={{display:'flex',alignItems:'center',gap:10}}>
           <input type="number" min="1"
@@ -1210,6 +1262,17 @@ function AdminPlayers({ appData, onRefresh }) {
           <button className="btn btn-kelly btn-sm" onClick={saveStartingPoints}>SAVE</button>
           <span style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)'}}>Currently: <strong style={{color:'var(--gold)'}}>{globalSP} pts</strong></span>
         </div>
+      </div>
+      <div style={{background: regLocked ? 'rgba(231,76,60,0.06)' : 'rgba(77,189,92,0.05)', border: regLocked ? '1px solid rgba(231,76,60,0.3)' : '1px solid rgba(77,189,92,0.15)', padding:16, marginBottom:24, display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:12}}>
+        <div>
+          <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)',letterSpacing:1,marginBottom:4}}>PLAYER REGISTRATION</div>
+          <div style={{fontFamily:'DM Mono,monospace',fontSize:12, color: regLocked ? 'var(--red)' : 'var(--kelly)'}}>
+            {regLocked ? '🔒 LOCKED — New sign-ups are disabled' : '🔓 OPEN — Players can create accounts'}
+          </div>
+        </div>
+        <button onClick={toggleRegistration} className={`btn btn-sm ${regLocked ? 'btn-kelly' : 'btn-red'}`}>
+          {regLocked ? '🔓 OPEN REGISTRATION' : '🔒 LOCK REGISTRATION'}
+        </button>
       </div>
 
       <div className="admin-title">REGISTERED PLAYERS ({players.length})</div>
@@ -1411,7 +1474,114 @@ function RoundTrackerView({ appData }) {
 }
 
 // ============================================================
-// WAGER LOG
+// PLAYER WAGER LOG (completed picks only — no pending)
+// ============================================================
+function PlayerWagerLogView() {
+  const [allPicks, setAllPicks] = useState([]);
+  const [allGames, setAllGames] = useState([]);
+  const [users, setUsers]       = useState([]);
+  const [filterPlayer, setFilterPlayer] = useState("all");
+  const [filterRound,  setFilterRound]  = useState("all");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([DB.getAllPicks(), DB.getGames(), DB.getAllUsers()]).then(([p,g,u]) => {
+      setAllPicks(p); setAllGames(g); setUsers(u.filter(x=>!x.is_admin)); setLoading(false);
+    });
+  }, []);
+
+  const wagers = allPicks.map(pick => {
+    const game = allGames.find(g=>g.id===pick.game_id)||pick.games;
+    const u    = users.find(u=>u.email===pick.email);
+    if (!game||!u) return null;
+    if (game.status !== "final") return null; // hide pending picks
+    const {won,push} = calcResult(game, pick.side);
+    const rawSpread = Number(game.spread);
+    const pickedAway = pick.side === 'away';
+    const pickedSpread = pickedAway ? rawSpread : -rawSpread;
+    const spreadLabel = pickedSpread > 0 ? `+${pickedSpread}` : `${pickedSpread}`;
+    const isUnderdog = pickedSpread > 0;
+    return { email:pick.email, name:u.name, round:pick.round,
+      game:`${game.away_team} vs ${game.home_team}`,
+      side:pickedAway?game.away_team:game.home_team,
+      spreadLabel, isUnderdog, wager:pick.wager,
+      result: push?'PUSH':won?'WIN':'LOSS' };
+  }).filter(Boolean);
+
+  const filtered = wagers
+    .filter(w=>filterPlayer==="all"||w.email===filterPlayer)
+    .filter(w=>filterRound==="all"||w.round===parseInt(filterRound))
+    .sort((a,b)=>a.round-b.round||a.name.localeCompare(b.name));
+
+  const wins   = filtered.filter(w=>w.result==='WIN').length;
+  const losses = filtered.filter(w=>w.result==='LOSS').length;
+
+  return (
+    <div>
+      <div className="round-banner">
+        <div className="round-name">WAGER LOG</div>
+        <div className="round-dates">Completed picks from all rounds</div>
+      </div>
+      <div style={{display:'flex', gap:12, marginBottom:20, flexWrap:'wrap', alignItems:'flex-end'}}>
+        <div className="field" style={{marginBottom:0}}><label>FILTER BY PLAYER</label>
+          <select value={filterPlayer} onChange={e=>setFilterPlayer(e.target.value)}>
+            <option value="all">All Players</option>
+            {users.map(u=><option key={u.email} value={u.email}>{u.name}</option>)}
+          </select>
+        </div>
+        <div className="field" style={{marginBottom:0}}><label>FILTER BY ROUND</label>
+          <select value={filterRound} onChange={e=>setFilterRound(e.target.value)}>
+            <option value="all">All Rounds</option>
+            {ROUNDS.map(r=><option key={r.num} value={r.num}>{r.name}</option>)}
+          </select>
+        </div>
+        <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)',paddingBottom:8}}>
+          {filtered.length} completed picks · {wins}W {losses}L
+        </div>
+      </div>
+
+      {loading && <div className="empty-state">Loading...</div>}
+      {!loading && (
+        <div style={{background:'var(--hardwood)', border:'1px solid var(--line)'}}>
+          <div style={{display:'grid', gridTemplateColumns:'120px 100px 1fr 120px 70px 70px 70px',
+            padding:'8px 16px', borderBottom:'1px solid var(--line)',
+            fontFamily:'DM Mono,monospace', fontSize:10, color:'var(--chalk-dim)', letterSpacing:1}}>
+            <span>PLAYER</span><span>ROUND</span><span>GAME</span><span>PICKED</span>
+            <span style={{textAlign:'right'}}>SPREAD</span>
+            <span style={{textAlign:'right'}}>WAGER</span>
+            <span style={{textAlign:'right'}}>RESULT</span>
+          </div>
+          {filtered.length===0 && <div className="empty-state">No completed picks yet.</div>}
+          {filtered.map((w,i) => (
+            <div key={i} style={{display:'grid', gridTemplateColumns:'120px 100px 1fr 120px 70px 70px 70px',
+              padding:'10px 16px', borderBottom:'1px solid rgba(255,255,255,0.03)',
+              fontSize:13, alignItems:'center',
+              background:i%2===0?'transparent':'rgba(255,255,255,0.02)'}}>
+              <span style={{fontWeight:600}}>{w.name}</span>
+              <span style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)'}}>
+                {ROUNDS[w.round-1]?.name?.replace('Round of ','R')||`R${w.round}`}
+              </span>
+              <span style={{color:'var(--chalk-dim)',fontSize:12,fontFamily:'DM Mono,monospace'}}>{w.game}</span>
+              <span style={{color:'var(--kelly)',fontSize:12,fontWeight:600}}>{w.side}</span>
+              <span style={{textAlign:'right',fontFamily:'DM Mono,monospace',fontSize:12,
+                color:w.isUnderdog?'#5b9bd5':'var(--gold)',fontWeight:w.isUnderdog?700:400}}>
+                {w.spreadLabel}
+              </span>
+              <span style={{textAlign:'right',fontFamily:'DM Mono,monospace',fontSize:13}}>{w.wager}</span>
+              <span style={{textAlign:'right',fontFamily:'DM Mono,monospace',fontSize:11,
+                color:w.result==='WIN'?'var(--green)':w.result==='LOSS'?'var(--red)':'var(--gold)'}}>
+                {w.result}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// WAGER LOG (admin)
 // ============================================================
 function WagerLogView() {
   const [allPicks, setAllPicks] = useState([]);
@@ -1969,10 +2139,10 @@ function FinalStandingsView({ currentEmail }) {
 
   useEffect(() => {
     (async () => {
-      const [users, allPicks, allGames] = await Promise.all([DB.getAllUsers(), DB.getAllPicks(), DB.getGames()]);
+      const [users, allPicks, allGames, sp] = await Promise.all([DB.getAllUsers(), DB.getAllPicks(), DB.getGames(), DB.startingPoints()]);
       const built = users.filter(u=>!u.is_admin).map(u => {
         const myPicks = allPicks.filter(p=>p.email===u.email);
-        const finalPts = u.rounds?.final ?? u.rounds?.[6] ?? 0;
+        const finalPts = getBestPoints(u, sp);
         let wins=0, losses=0;
         myPicks.forEach(pick => {
           const game = allGames.find(g=>g.id===pick.game_id)||pick.games;
