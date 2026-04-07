@@ -439,7 +439,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
 
       {/* ========================= PLAYER LIST ========================= */}
       <div style={STYLES.section}>
-        <div style={STYLES.title}>PLAYER LIST - ROUND {selectedRound}</div>
+        <div style={STYLES.title}>PLAYER LIST - KELLY ROUND {selectedRound}</div>
         <div style={{ overflowX: 'auto' }}>
           <table style={STYLES.table}>
             <thead>
@@ -474,7 +474,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
 
       {/* ========================= WAGER LOG ========================= */}
       <div style={STYLES.section}>
-        <div style={STYLES.title}>WAGER LOG - ROUND {selectedRound}</div>
+        <div style={STYLES.title}>WAGER LOG - KELLY ROUND {selectedRound}</div>
         <div style={{ overflowX: 'auto' }}>
           <table style={STYLES.table}>
             <thead>

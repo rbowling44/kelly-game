@@ -143,7 +143,7 @@ async function getOddsForGolfer(golfer_id, kelly_round) {
 }
 
 async function getPlayerBankrollsForRound(tournament_id, kelly_round) {
-  const { data: users, error: usersErr } = await supabase.from('public.users').select('id, email, name');
+  const { data: users, error: usersErr } = await supabase.from('users').select('id, email, name');
   if (usersErr) throw usersErr;
   const { data: bankrolls, error: bErr } = await supabase.from('golf_bankrolls').select('*').eq('tournament_id', tournament_id).eq('kelly_round', kelly_round);
   if (bErr) throw bErr;
@@ -177,7 +177,7 @@ async function getWagersForRound(tournament_id, kelly_round) {
   // get user names
   const wagerIds = (data || []).map(w => w.user_id);
   const uniqueUserIds = [...new Set(wagerIds)];
-  const { data: users, error: usersErr } = await supabase.from('public.users').select('id, name').in('id', uniqueUserIds);
+  const { data: users, error: usersErr } = await supabase.from('users').select('id, name').in('id', uniqueUserIds);
   if (usersErr) throw usersErr;
   const userMap = {};
   (users || []).forEach(u => { userMap[u.id] = u.name; });
