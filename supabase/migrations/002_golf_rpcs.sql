@@ -61,6 +61,8 @@ DECLARE
   multiplier NUMERIC;
   odds_num INT;
   points_returned INT;
+  user_id UUID;
+  total_points_won INT;
 BEGIN
   -- determine leader position (lowest final_position)
   SELECT MIN(final_position) INTO leader_pos FROM golf_golfers WHERE tournament_id = p_tournament_id AND final_position IS NOT NULL;
@@ -133,7 +135,9 @@ BEGIN
     DELETE FROM golf_bankrolls WHERE user_id = rec.user_id AND tournament_id = p_tournament_id AND kelly_round = p_kelly_round + 1;
     INSERT INTO golf_bankrolls (user_id, tournament_id, kelly_round, starting_points, points_remaining)
     VALUES (rec.user_id, p_tournament_id, p_kelly_round + 1, rec.total, rec.total);
-    RETURN NEXT rec.user_id, rec.total;
+    user_id := rec.user_id;
+    total_points_won := rec.total;
+    RETURN NEXT;
   END LOOP;
 
 END;

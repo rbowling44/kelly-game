@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from './lib/supabaseClient.js';
 import { GolfModeProvider, useGolfMode } from './contexts/GolfModeContext.jsx';
 import GolfModeToggle from './components/admin/GolfModeToggle.jsx';
+import GolfModeAdmin from './components/admin/GolfModeAdmin.jsx';
 import OddsManager from './components/admin/OddsManager.jsx';
 import SettleRound from './components/admin/SettleRound.jsx';
 import LeaderboardSync from './components/admin/LeaderboardSync.jsx';
@@ -1165,11 +1166,7 @@ function AdminView({ appData, onRefresh }) {
           <div className="empty-state">No active golf tournament selected. Create one or choose an existing tournament.</div>
         )}
         {selectedGolfTournamentId && (
-          <div>
-            <OddsManager tournamentId={selectedGolfTournamentId} kellyRound={1} />
-            <LeaderboardSync tournamentId={selectedGolfTournamentId} />
-            <SettleRound tournamentId={selectedGolfTournamentId} />
-          </div>
+          <GolfModeAdmin tournamentId={selectedGolfTournamentId} activeKellyRound={adminRound} />
         )}
       </div>
     );

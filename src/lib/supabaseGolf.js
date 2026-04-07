@@ -105,4 +105,83 @@ async function getLeaderboard(tournament_id) {
   return Object.entries(agg).map(([user_id, points]) => ({ user_id, points }));
 }
 
-export { placeWager, settleRound, upsertGolfers, upsertOdds, getTournament, getGolfersWithOdds, getUserWagers, getWagerLog, syncLeaderboardToGolfers, getLeaderboard };
+async function addGolfer(tournament_id, name) {
+  const { data, error } = await supabase.from('golf_golfers').insert({ tournament_id, name }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function deleteGolfer(golfer_id) {
+  const { error } = await supabase.from('golf_golfers').delete().eq('id', golfer_id);
+  if (error) throw error;
+}
+
+async function getGolfers(tournament_id) {
+  const { data, error } = await supabase.from('golf_golfers').select('*').eq('tournament_id', tournament_id).order('name', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+async function saveGolferOdds(golfer_id, kelly_round, category, american_odds) {
+  const { data, error } = await supabase.from('golf_odds').upsert({
+    golfer_id,
+    kelly_round,
+    category,
+    american_odds,
+    set_by: 'admin'
+  }, { onConflict: 'golfer_id,kelly_round,category' });
+  if (error) throw error;
+  return data;
+}
+
+async function getOddsForGolfer(golfer_id, kelly_round) {
+  const { data, error } = await supabase.from('golf_odds').select('*').eq('golfer_id', golfer_id).eq('kelly_round', kelly_round);
+  if (error) throw error;
+  const odds = {};
+  (data || []).forEach(o => { odds[o.category] = o.american_odds; });
+  return odds;
+}
+
+async function getPlayerBankrollsForRound(tournament_id, kelly_round) {
+  const { data: users, error: usersErr } = await supabase.from('public.users').select('id, email, name');
+  if (usersErr) throw usersErr;
+  const { data: bankrolls, error: bErr } = await supabase.from('golf_bankrolls').select('*').eq('tournament_id', tournament_id).eq('kelly_round', kelly_round);
+  if (bErr) throw bErr;
+  const { data: wagers, error: wErr } = await supabase.from('golf_wagers').select('user_id').eq('tournament_id', tournament_id).eq('kelly_round', kelly_round);
+  if (wErr) throw wErr;
+  // count wagers per user
+  const wagerCounts = {};
+  (wagers || []).forEach(w => { wagerCounts[w.user_id] = (wagerCounts[w.user_id] || 0) + 1; });
+  // merge
+  return (users || []).map(u => {
+    const bankroll = (bankrolls || []).find(b => b.user_id === u.id);
+    return {
+      user_id: u.id,
+      email: u.email,
+      name: u.name,
+      starting_points: bankroll?.starting_points || 0,
+      points_remaining: bankroll?.points_remaining || 0,
+      wager_count: wagerCounts[u.id] || 0
+    };
+  });
+}
+
+async function getWagersForRound(tournament_id, kelly_round) {
+  const { data, error } = await supabase
+    .from('golf_wagers')
+    .select(`id, user_id, golfer_id, category, points_wagered, odds_at_time, result, points_won, created_at, golf_golfers(name)`)
+    .eq('tournament_id', tournament_id)
+    .eq('kelly_round', kelly_round)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  // get user names
+  const wagerIds = (data || []).map(w => w.user_id);
+  const uniqueUserIds = [...new Set(wagerIds)];
+  const { data: users, error: usersErr } = await supabase.from('public.users').select('id, name').in('id', uniqueUserIds);
+  if (usersErr) throw usersErr;
+  const userMap = {};
+  (users || []).forEach(u => { userMap[u.id] = u.name; });
+  return (data || []).map(w => ({ ...w, player_name: userMap[w.user_id] || 'Unknown' }));
+}
+
+export { placeWager, settleRound, upsertGolfers, upsertOdds, getTournament, getGolfersWithOdds, getUserWagers, getWagerLog, syncLeaderboardToGolfers, getLeaderboard, addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer, getPlayerBankrollsForRound, getWagersForRound };
