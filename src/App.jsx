@@ -381,7 +381,12 @@ function AppInner() {
   const login = (u) => {
     setUser(u);
     sessionStorage.setItem('kelly_session', JSON.stringify(u));
-    if (u.is_admin) refreshUnread();
+    if (u.is_admin) {
+      refreshUnread();
+    } else {
+      // Always land on picks after login — in golf mode this renders the Golf picks page
+      navigate('picks');
+    }
   };
   const logout = () => { setUser(null); sessionStorage.removeItem('kelly_session'); setTab("picks"); };
 
