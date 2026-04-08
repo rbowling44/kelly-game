@@ -108,7 +108,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
     if (!window.confirm(`Remove ${p?.name} from this golf tournament?\n\nThis deletes their bankroll and wagers for this tournament only. Their account is kept.`)) return;
     await Promise.all([
       supabase.from('golf_bankrolls').delete().eq('user_email', email).eq('tournament_id', tournamentId),
-      supabase.from('golf_wagers').delete().eq('user_id', email).eq('tournament_id', tournamentId),
+      supabase.from('golf_wagers').delete().eq('user_email', email).eq('tournament_id', tournamentId),
     ]);
     setPlayers(prev => prev.filter(x => x.email !== email));
     flashSuccess(`${p?.name} removed from tournament.`);

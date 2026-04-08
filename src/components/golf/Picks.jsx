@@ -79,7 +79,7 @@ export default function Picks({ tournamentId, user }) {
       await placeWager({
         tournament_id: tournamentId,
         kelly_round: round,
-        user_id: user.email,
+        user_email: user.email,
         golfer_id: golfer.id,
         category,
         points_wagered: pts,
