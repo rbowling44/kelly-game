@@ -752,25 +752,44 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
       <div style={{ background: 'rgba(231,76,60,0.05)', border: '1px solid rgba(231,76,60,0.2)', padding: 20, marginBottom: 20 }}>
         <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 2, color: 'var(--red)', marginBottom: 8 }}>DANGER ZONE</div>
         <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--chalk-dim)', marginBottom: 16, lineHeight: 1.6 }}>
-          Clears all wagers and bankrolls for the active tournament. Golfers and odds are kept. Use for testing only.
+          Full reset: deletes all wagers and bankrolls, resets tournament to Round 1, reopens wager window, and clears all missed-cut flags. Golfers and odds are kept. Use for testing only.
         </div>
         <button
           style={{ ...STYLES.btn, background: 'var(--red)', color: '#fff', border: 'none' }}
           disabled={loading}
           onClick={async () => {
             if (!tournamentId) return flashSettings('No active tournament.');
-            if (!window.confirm('⚠️ RESET ALL GOLF DATA?\n\nThis will delete all wagers and bankrolls for this tournament.\nGolfers and odds are kept.\n\nThis cannot be undone.')) return;
+            if (!window.confirm('⚠️ RESET ALL GOLF DATA?\n\nThis will delete ALL wagers and bankrolls for this tournament and reset to Round 1.\n\nThis cannot be undone.')) return;
             setLoading(true);
-            await Promise.all([
-              supabase.from('golf_wagers').delete().eq('tournament_id', tournamentId),
-              supabase.from('golf_bankrolls').delete().eq('tournament_id', tournamentId),
-            ]);
-            await loadData();
-            setLoading(false);
-            flashSuccess('Golf data reset. Wagers and bankrolls cleared.');
+            try {
+              await Promise.all([
+                // 1. Delete all wagers for this tournament
+                supabase.from('golf_wagers').delete().eq('tournament_id', tournamentId),
+                // 2. Delete all bankrolls for this tournament
+                supabase.from('golf_bankrolls').delete().eq('tournament_id', tournamentId),
+                // 3. Reset tournament status to 'upcoming' and active round to 1
+                supabase.from('golf_tournaments').update({ status: 'upcoming', active_kelly_round: 1 }).eq('id', tournamentId),
+                // 4 & 5. Reset settings
+                supabase.from('settings').upsert({ key: 'golf_active_kelly_round', value: '1' }),
+                supabase.from('settings').upsert({ key: 'golf_wager_window_open', value: 'false' }),
+                supabase.from('settings').upsert({ key: 'golf_last_settled_round', value: '' }),
+                // 6. Clear missed-cut flags on all golfers in this tournament
+                supabase.from('golf_golfers').update({ made_cut: true }).eq('tournament_id', tournamentId),
+              ]);
+              // 7. Reload everything to reflect fresh state
+              setActiveGolfRound('1');
+              setWagerWindowOpen('false');
+              await loadData();
+              await loadSettings();
+              flashSuccess('Full reset complete. Tournament is back to Round 1.');
+            } catch (e) {
+              setError('Reset failed: ' + e.message);
+            } finally {
+              setLoading(false);
+            }
           }}
         >
-          🗑 RESET ALL GOLF WAGERS &amp; BANKROLLS
+          🗑 RESET ALL GOLF DATA
         </button>
       </div>
     </div>
