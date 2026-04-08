@@ -53,11 +53,11 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
     if (tournamentId) {
       const { data: allUsers } = await supabase.from('users').select('email, is_admin');
       const nonAdmins = (allUsers || []).filter(u => !u.is_admin);
-      const { data: existing } = await supabase.from('golf_bankrolls').select('user_id').eq('tournament_id', tournamentId).eq('kelly_round', 1);
-      const existingSet = new Set((existing || []).map(b => b.user_id));
+      const { data: existing } = await supabase.from('golf_bankrolls').select('user_email').eq('tournament_id', tournamentId).eq('kelly_round', 1);
+      const existingSet = new Set((existing || []).map(b => b.user_email));
       const toInsert = nonAdmins
         .filter(u => !existingSet.has(u.email))
-        .map(u => ({ user_id: u.email, tournament_id: Number(tournamentId), kelly_round: 1, starting_points: val, points_remaining: val }));
+        .map(u => ({ user_email: u.email, tournament_id: Number(tournamentId), kelly_round: 1, starting_points: val, points_remaining: val }));
       // Insert one at a time so a single failure doesn't block the rest
       let created = 0;
       for (const row of toInsert) {
@@ -85,7 +85,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
     const p = players.find(x => x.email === email);
     const { error } = await supabase.from('golf_bankrolls')
       .update({ points_remaining: val })
-      .eq('user_id', email)
+      .eq('user_email', email)
       .eq('tournament_id', tournamentId)
       .eq('kelly_round', selectedRound);
     if (error) return setError(error.message);
@@ -107,7 +107,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
     const p = players.find(x => x.email === email);
     if (!window.confirm(`Remove ${p?.name} from this golf tournament?\n\nThis deletes their bankroll and wagers for this tournament only. Their account is kept.`)) return;
     await Promise.all([
-      supabase.from('golf_bankrolls').delete().eq('user_id', email).eq('tournament_id', tournamentId),
+      supabase.from('golf_bankrolls').delete().eq('user_email', email).eq('tournament_id', tournamentId),
       supabase.from('golf_wagers').delete().eq('user_id', email).eq('tournament_id', tournamentId),
     ]);
     setPlayers(prev => prev.filter(x => x.email !== email));

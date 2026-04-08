@@ -155,7 +155,7 @@ async function getPlayerBankrollsForRound(tournament_id, kelly_round) {
   (wagers || []).forEach(w => { wagerCounts[w.user_id] = (wagerCounts[w.user_id] || 0) + 1; });
   // merge
   return (users || []).map(u => {
-    const bankroll = (bankrolls || []).find(b => b.user_id === u.email);
+    const bankroll = (bankrolls || []).find(b => b.user_email === u.email);
     return {
       user_id: u.email,
       email: u.email,
@@ -174,7 +174,7 @@ async function ensureBankroll(tournament_id, kelly_round, user_id) {
     .select('id, starting_points, points_remaining')
     .eq('tournament_id', tournament_id)
     .eq('kelly_round', kelly_round)
-    .eq('user_id', user_id)
+    .eq('user_email', user_id)
     .maybeSingle();
   if (existing) return existing;
 
@@ -183,7 +183,7 @@ async function ensureBankroll(tournament_id, kelly_round, user_id) {
 
   const { data, error } = await supabase
     .from('golf_bankrolls')
-    .insert({ tournament_id, kelly_round, user_id, starting_points: startPts, points_remaining: startPts })
+    .insert({ tournament_id, kelly_round, user_email: user_id, starting_points: startPts, points_remaining: startPts })
     .select()
     .single();
   if (error) throw error;
