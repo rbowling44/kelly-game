@@ -117,7 +117,19 @@ export default function WagerLog({ tournamentId, isAdmin = false, user = null })
       </div>
 
       {loading && <div className="empty-state">Loading...</div>}
-      {!loading && filtered.length === 0 && <div className="empty-state">No wagers found.</div>}
+      {!loading && filtered.length === 0 && (() => {
+        // If a specific round is selected and all its wagers are still pending, give a helpful hint
+        const hasOnlyPending = !isAdmin && round !== 'all' && wagers.length > 0 && wagers.every(w => w.result === 'pending');
+        if (hasOnlyPending) {
+          return (
+            <div style={{ background: 'rgba(77,189,92,0.04)', border: '1px solid rgba(77,189,92,0.12)', padding: '20px 24px', margin: '8px 0', fontFamily: "'DM Mono', monospace", fontSize: 12, color: 'var(--chalk-dim)', lineHeight: 1.9 }}>
+              <div style={{ color: 'var(--kelly)', fontSize: 11, letterSpacing: 1, marginBottom: 8 }}>ACTIVE ROUND SELECTED</div>
+              You selected an active round. To see your pending picks go to the <strong style={{ color: 'var(--chalk)' }}>History</strong> tab, or to see all players' pending picks go to the <strong style={{ color: 'var(--chalk)' }}>Picks</strong> page.
+            </div>
+          );
+        }
+        return <div className="empty-state">No wagers found.</div>;
+      })()}
 
       {!loading && filtered.length > 0 && (
         <div style={{ overflowX: 'auto' }}>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getGolfers, settleRoundClient } from '../../lib/supabaseGolf';
+import { getGolfers, settleRoundClient, completeTournament } from '../../lib/supabaseGolf';
 
 const MONO = { fontFamily: "'DM Mono', monospace" };
 const BEBAS = { fontFamily: "'Bebas Neue', sans-serif" };
@@ -58,6 +58,7 @@ export default function SettleRound({ tournamentId }) {
   const [fetching, setFetching] = useState(false);
   const [resultMsg, setResultMsg] = useState(null); // { ok, text }
   const [confirmed, setConfirmed] = useState(false);
+  const [settleModal, setSettleModal] = useState(null); // { type: 'next', nextRound } | { type: 'final' } | null
 
   useEffect(() => {
     if (!tournamentId) return;
@@ -105,8 +106,14 @@ export default function SettleRound({ tournamentId }) {
         top10:  top10.map(Number),
       };
       const count = await settleRoundClient({ tournament_id: tournamentId, kelly_round: round, results });
-      setResultMsg({ ok: true, text: `Round ${round} settled — ${count} wager(s) processed. Next round bankrolls seeded from this round's results.` });
+      setResultMsg({ ok: true, text: `Round ${round} settled — ${count} wager(s) processed.` });
       setConfirmed(false);
+      // Show post-settle reminder modal
+      if (round < 3) {
+        setSettleModal({ type: 'next', nextRound: round + 1 });
+      } else {
+        setSettleModal({ type: 'final' });
+      }
     } catch (e) {
       console.error(e);
       setResultMsg({ ok: false, text: 'Settle failed: ' + (e.message || e) });
@@ -118,6 +125,67 @@ export default function SettleRound({ tournamentId }) {
 
   return (
     <div style={S.section}>
+      {/* Post-settle reminder modal */}
+      {settleModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: 'var(--hardwood)', border: '2px solid var(--kelly)', maxWidth: 480, width: '100%', padding: 32, position: 'relative' }}>
+            {settleModal.type === 'next' ? (
+              <>
+                <div style={{ ...BEBAS, fontSize: 26, letterSpacing: 2, color: 'var(--kelly)', marginBottom: 16 }}>
+                  Round Settled Successfully!
+                </div>
+                <div style={{ ...MONO, fontSize: 13, color: 'var(--gold)', marginBottom: 20, padding: '12px 16px', background: 'rgba(240,192,64,0.08)', border: '1px solid rgba(240,192,64,0.3)' }}>
+                  ⚠️ REMINDER: Don't forget to:
+                </div>
+                <ol style={{ ...MONO, fontSize: 12, color: 'var(--chalk)', lineHeight: 2.2, paddingLeft: 20, margin: '0 0 24px' }}>
+                  <li>Change the <strong style={{ color: 'var(--kelly)' }}>Active Round</strong> to Round {settleModal.nextRound} in Game Settings</li>
+                  <li><strong style={{ color: 'var(--kelly)' }}>Open the Wager Window</strong> for the new round</li>
+                  <li><strong style={{ color: 'var(--kelly)' }}>Notify players</strong> their new bankroll is ready</li>
+                </ol>
+                <button
+                  onClick={() => setSettleModal(null)}
+                  style={{ ...S.btn, ...S.btnKelly, width: '100%', padding: '12px', fontSize: 15, letterSpacing: 2 }}
+                >
+                  Got it!
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ ...BEBAS, fontSize: 26, letterSpacing: 2, color: 'var(--gold)', marginBottom: 8 }}>
+                  Round 3 Settled! 🏆
+                </div>
+                <div style={{ ...MONO, fontSize: 13, color: 'var(--chalk)', marginBottom: 8 }}>
+                  The Masters Kelly Game is complete!
+                </div>
+                <div style={{ ...MONO, fontSize: 12, color: 'var(--chalk-dim)', marginBottom: 24, lineHeight: 1.7 }}>
+                  Click <strong style={{ color: 'var(--gold)' }}>Complete Tournament</strong> to reveal Final Standings to all players.
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await completeTournament(tournamentId);
+                        setSettleModal(null);
+                      } catch (e) {
+                        console.error(e);
+                      }
+                    }}
+                    style={{ ...S.btn, background: 'var(--gold)', color: '#0a1a0e', flex: 1, padding: '12px', fontSize: 14, letterSpacing: 1 }}
+                  >
+                    🏆 Complete Tournament
+                  </button>
+                  <button
+                    onClick={() => setSettleModal(null)}
+                    style={{ ...S.btn, background: 'transparent', border: '1px solid var(--line)', color: 'var(--chalk-dim)', padding: '12px 20px', fontSize: 13 }}
+                  >
+                    Not yet
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       <div style={S.title}>SETTLE ROUND</div>
 
       <div style={S.infoBox}>

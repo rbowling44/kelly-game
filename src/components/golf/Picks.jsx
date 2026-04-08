@@ -150,6 +150,14 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
           </div>
         </div>
 
+        {/* Explanatory note */}
+        <div style={{ background: 'rgba(77,189,92,0.06)', border: '1px solid rgba(77,189,92,0.18)', padding: '14px 18px', marginBottom: 20, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          <div style={{ fontSize: 20, lineHeight: 1 }}>👀</div>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: 'var(--chalk-dim)', lineHeight: 1.7 }}>
+            Picks are locked for this round. Below are all pending picks for every player in The Masters Kelly Game. Use this to follow along and cheer on your golfers — and keep an eye on the competition!
+          </div>
+        </div>
+
         {/* Pending wagers transparency table */}
         {lockedWagers.length > 0 && (() => {
           const lockPlayers    = [...new Set(lockedWagers.map(w => w.player_name || w.user_email))].sort();
@@ -194,15 +202,24 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredLocked.map(w => (
-                      <tr key={w.id}>
-                        <td style={TD}>{w.player_name || w.user_email}</td>
-                        <td style={TD}>{w.golf_golfers?.name || '—'}</td>
-                        <td style={{ ...TD, textTransform: 'uppercase', letterSpacing: 1 }}>{w.category}</td>
-                        <td style={{ ...TD, textAlign: 'right', color: 'var(--gold)' }}>{w.points_wagered}</td>
-                        <td style={{ ...TD, textAlign: 'right', color: 'var(--chalk-dim)' }}>{calcToWin(w.points_wagered, w.odds_at_time) ?? '—'}</td>
-                      </tr>
-                    ))}
+                    {filteredLocked.map(w => {
+                      const isMe = w.user_email === user.email;
+                      const rowBase = { borderBottom: '1px solid rgba(77,189,92,0.08)' };
+                      const rowStyle = isMe ? { ...rowBase, background: 'rgba(77,189,92,0.08)', borderLeft: '3px solid var(--kelly)' } : rowBase;
+                      const cellStyle = (extra) => ({ ...TD, ...extra, borderBottom: 'none' });
+                      return (
+                        <tr key={w.id} style={rowStyle}>
+                          <td style={cellStyle({})}>
+                            {w.player_name || w.user_email}
+                            {isMe && <span style={{ marginLeft: 8, fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 1, padding: '1px 6px', background: 'rgba(77,189,92,0.2)', border: '1px solid rgba(77,189,92,0.4)', color: 'var(--kelly)' }}>YOU</span>}
+                          </td>
+                          <td style={cellStyle({})}>{w.golf_golfers?.name || '—'}</td>
+                          <td style={cellStyle({ textTransform: 'uppercase', letterSpacing: 1 })}>{w.category}</td>
+                          <td style={cellStyle({ textAlign: 'right', color: 'var(--gold)' })}>{w.points_wagered}</td>
+                          <td style={cellStyle({ textAlign: 'right', color: 'var(--chalk-dim)' })}>{calcToWin(w.points_wagered, w.odds_at_time) ?? '—'}</td>
+                        </tr>
+                      );
+                    })}
                     {filteredLocked.length === 0 && (
                       <tr><td colSpan={5} style={{ ...TD, textAlign: 'center', color: 'var(--chalk-dim)', padding: '24px' }}>No wagers match the selected filters.</td></tr>
                     )}
@@ -248,6 +265,7 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
           <li>All picks must be made before first tee time of the day</li>
           <li>Leader, Top 5, and Top 10 refer to how the golfer finished that Kelly Round</li>
           <li>Kelly Round 1 is cumulative Thurs/Fri &nbsp;|&nbsp; Round 2 is Saturday &nbsp;|&nbsp; Round 3 is Sunday</li>
+          <li><strong style={{ color: 'var(--red)' }}>⚠️ Any unused points in a round will be forfeited</strong></li>
         </ul>
       </div>
 
