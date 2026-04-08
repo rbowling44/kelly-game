@@ -90,6 +90,9 @@ async function settleRoundClient({ tournament_id, kelly_round, results }) {
     }
   }
 
+  // Record the last settled round so the leaderboard stays static between settles
+  await supabase.from('settings').upsert({ key: 'golf_last_settled_round', value: kelly_round.toString() });
+
   return updates.length;
 }
 
@@ -163,9 +166,10 @@ async function syncLeaderboardToGolfers(tournament_id) {
 }
 
 async function getLeaderboard(tournament_id) {
-  // Only show the active kelly round's points_remaining — never sum across rounds
-  const { data: roundSetting } = await supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle();
-  const activeRound = parseInt(roundSetting?.value || '1');
+  // Only show the last SETTLED round — stays static between admin settles
+  const { data: roundSetting } = await supabase.from('settings').select('value').eq('key', 'golf_last_settled_round').maybeSingle();
+  const activeRound = parseInt(roundSetting?.value || '0');
+  if (!activeRound) return []; // no rounds settled yet
 
   const { data: bankrolls, error: bErr } = await supabase
     .from('golf_bankrolls')
@@ -303,4 +307,47 @@ async function getWagersForRound(tournament_id, kelly_round) {
   return (data || []).map(w => ({ ...w, player_name: userMap[w.user_email] || 'Unknown' }));
 }
 
-export { placeWager, settleRound, settleRoundClient, upsertGolfers, upsertOdds, getTournament, getGolfersWithOdds, getUserWagers, getWagerLog, syncLeaderboardToGolfers, getLeaderboard, addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer, getPlayerBankrollsForRound, getWagersForRound, ensureBankroll };
+async function toggleGolferCut(golfer_id, made_cut) {
+  const { error } = await supabase.from('golf_golfers').update({ made_cut }).eq('id', golfer_id);
+  if (error) throw error;
+}
+
+async function completeTournament(tournament_id) {
+  const { error } = await supabase.from('golf_tournaments').update({ status: 'completed' }).eq('id', tournament_id);
+  if (error) throw error;
+}
+
+async function getFinalStandings(tournament_id) {
+  // Round 3 bankrolls hold the final compounded points via use-it-or-lose-it
+  const { data: bankrolls, error: bErr } = await supabase
+    .from('golf_bankrolls')
+    .select('user_email, points_remaining')
+    .eq('tournament_id', tournament_id)
+    .eq('kelly_round', 3);
+  if (bErr) throw bErr;
+
+  if (!bankrolls || !bankrolls.length) return [];
+
+  const emails = [...new Set(bankrolls.map(b => b.user_email))];
+  const { data: users } = await supabase.from('users').select('email, name').in('email', emails);
+  const nameMap = {};
+  (users || []).forEach(u => { nameMap[u.email] = u.name; });
+
+  // Fetch all wagers across all rounds for history
+  const { data: wagers } = await supabase
+    .from('golf_wagers')
+    .select(`id, user_email, kelly_round, category, points_wagered, odds_at_time, result, points_won, golf_golfers(name)`)
+    .eq('tournament_id', tournament_id)
+    .order('kelly_round', { ascending: true });
+
+  return (bankrolls || [])
+    .map(b => ({
+      user_email: b.user_email,
+      name: nameMap[b.user_email] || b.user_email,
+      points: b.points_remaining,
+      wagers: (wagers || []).filter(w => w.user_email === b.user_email),
+    }))
+    .sort((a, b) => b.points - a.points);
+}
+
+export { placeWager, settleRound, settleRoundClient, upsertGolfers, upsertOdds, getTournament, getGolfersWithOdds, getUserWagers, getWagerLog, syncLeaderboardToGolfers, getLeaderboard, addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer, getPlayerBankrollsForRound, getWagersForRound, ensureBankroll, toggleGolferCut, completeTournament, getFinalStandings };

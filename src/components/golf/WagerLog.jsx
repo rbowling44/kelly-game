@@ -19,7 +19,7 @@ const TH = { ...MONO, fontSize: 11, letterSpacing: 1, color: 'var(--kelly)', pad
 const TD = { ...MONO, fontSize: 12, color: 'var(--chalk)', padding: '10px 12px', borderBottom: '1px solid rgba(77,189,92,0.08)' };
 const SEL = { background: '#fff', border: '1px solid var(--line)', color: '#111', padding: '6px 10px', ...MONO, fontSize: 12, outline: 'none' };
 
-// isAdmin: true = admin full log, false = player view (own wagers only, no pending)
+// isAdmin: true = admin full log, false = player view (own wagers only by default, no pending)
 export default function WagerLog({ tournamentId, isAdmin = false, user = null }) {
   const [wagers, setWagers] = useState([]);
   const [round, setRound] = useState('all');
@@ -27,6 +27,7 @@ export default function WagerLog({ tournamentId, isAdmin = false, user = null })
   const [filterGolfer, setFilterGolfer] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [sortBy, setSortBy] = useState('newest');
+  const [viewScope, setViewScope] = useState('mine'); // 'mine' | 'all' — player mode only
   const [loading, setLoading] = useState(false);
 
   useEffect(() => { if (tournamentId) load(); }, [tournamentId, round]);
@@ -58,7 +59,7 @@ export default function WagerLog({ tournamentId, isAdmin = false, user = null })
 
   let filtered = wagers.filter(w => {
     if (!isAdmin && w.result === 'pending') return false;
-    if (!isAdmin && user && w.user_email !== user.email) return false;
+    if (!isAdmin && viewScope === 'mine' && user && w.user_email !== user.email) return false;
     if (filterPlayer && (w.player_name || w.user_email) !== filterPlayer) return false;
     if (filterGolfer && w.golf_golfers?.name !== filterGolfer) return false;
     if (filterCategory && w.category !== filterCategory) return false;
@@ -75,6 +76,14 @@ export default function WagerLog({ tournamentId, isAdmin = false, user = null })
     <div>
       {/* Filters */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* Player view scope toggle */}
+        {!isAdmin && (
+          <div style={{ display: 'flex', gap: 4 }}>
+            {[{ v: 'mine', l: 'MY WAGERS' }, { v: 'all', l: 'ALL PLAYERS' }].map(({ v, l }) => (
+              <button key={v} onClick={() => setViewScope(v)} style={{ ...MONO, fontSize: 11, letterSpacing: 1, padding: '6px 12px', cursor: 'pointer', border: viewScope === v ? '1px solid var(--kelly)' : '1px solid var(--line)', background: viewScope === v ? 'rgba(77,189,92,0.15)' : 'rgba(255,255,255,0.03)', color: viewScope === v ? 'var(--kelly)' : 'var(--chalk-dim)' }}>{l}</button>
+            ))}
+          </div>
+        )}
         {isAdmin && (
           <select value={filterPlayer} onChange={e => setFilterPlayer(e.target.value)} style={SEL}>
             <option value="">All Players</option>

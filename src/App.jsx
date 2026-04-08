@@ -6,6 +6,7 @@ import GolfModeAdmin from "./components/admin/GolfModeAdmin";
 import GolfRoundTracker from './components/admin/GolfRoundTracker.jsx';
 import PicksGolf from './components/golf/Picks.jsx';
 import LeaderboardGolf from './components/golf/Leaderboard.jsx';
+import FinalStandingsGolf from './components/golf/FinalStandings.jsx';
 import WagerLogGolf from './components/golf/WagerLog.jsx';
 import HistoryGolf from './components/golf/History.jsx';
 import RulesGolf from './components/golf/Rules.jsx';
@@ -276,6 +277,7 @@ function AppInner() {
   const [unread, setUnread]     = useState(0);
   const [liveWagered, setLiveWagered] = useState(0);
   const [golfTournamentId, setGolfTournamentId] = useState(null);
+  const [golfTournamentComplete, setGolfTournamentComplete] = useState(false);
   const [golfBankrollPts, setGolfBankrollPts] = useState(null);
   const { mode, setMode } = useGolfMode();
 
@@ -325,7 +327,11 @@ function AppInner() {
     const [cr, sp, rs, tc, rl, appMode, activeGolfTournamentId] = await Promise.all([DB.currentRound(), DB.startingPoints(), DB.roundStatus(), DB.getSetting('tournament_complete'), DB.registrationLocked(), DB.getSetting('app_mode'), DB.getActiveGolfTournamentId()]);
     setAppData({ currentRound:cr, startingPoints:sp, roundStatus:rs, tournamentComplete: tc === 'true', registrationLocked: rl });
     if (appMode) { setMode(appMode); try { localStorage.setItem('kelly_mode', appMode); } catch(e) {} }
-    if (activeGolfTournamentId) setGolfTournamentId(activeGolfTournamentId);
+    if (activeGolfTournamentId) {
+      setGolfTournamentId(activeGolfTournamentId);
+      const { data: gt } = await supabase.from('golf_tournaments').select('status').eq('id', activeGolfTournamentId).maybeSingle();
+      setGolfTournamentComplete(gt?.status === 'completed');
+    }
     // Also refresh current user from DB so points are always fresh
     const saved = sessionStorage.getItem('kelly_session');
     if (saved) {
@@ -445,7 +451,7 @@ function AppInner() {
       </nav>
       <main className="main">
         {tab==='picks'         && !liveUser.is_admin && (mode==='golf' ? <PicksGolf user={liveUser} tournamentId={golfTournamentId} onWagerPlaced={refreshGolfBankroll} /> : <PicksView         user={liveUser} appData={appData} onWageredChange={setLiveWagered} onUserUpdate={(u)=>{ setUser(u); sessionStorage.setItem('kelly_session',JSON.stringify(u)); }} />)}
-        {tab==='board'         &&                      (mode==='golf' ? <LeaderboardGolf tournamentId={golfTournamentId} /> : <LeaderboardView   currentEmail={liveUser.email} appData={appData} />)}
+        {tab==='board'         &&                      (mode==='golf' ? (golfTournamentComplete ? <FinalStandingsGolf tournamentId={golfTournamentId} currentUserEmail={liveUser.email} /> : <LeaderboardGolf tournamentId={golfTournamentId} />) : <LeaderboardView   currentEmail={liveUser.email} appData={appData} />)}
         {tab==='history'       && !liveUser.is_admin && (mode==='golf' ? <HistoryGolf tournamentId={golfTournamentId} user={liveUser} /> : <HistoryView       user={liveUser} />)}
         {tab==='waglog'        && !liveUser.is_admin && (mode==='golf' ? <WagerLogGolf tournamentId={golfTournamentId} user={liveUser} /> : <PlayerWagerLogView />)}
         {tab==='rules'         && !liveUser.is_admin && (mode==='golf' ? <RulesGolf /> : <RulesView         user={liveUser} appData={appData} />)}

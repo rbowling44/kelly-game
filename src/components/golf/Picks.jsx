@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getGolfersWithOdds, placeWager, ensureBankroll } from '../../lib/supabaseGolf';
+import { getGolfersWithOdds, placeWager, ensureBankroll, getWagersForRound } from '../../lib/supabaseGolf';
 import { supabase } from '../../lib/supabaseClient';
 
 const CATS = [
@@ -23,23 +23,44 @@ function calcToWin(pts, oddsStr) {
   return win;
 }
 
+const MONO = { fontFamily: "'DM Mono', monospace" };
+const TH = { ...MONO, fontSize: 11, letterSpacing: 1, color: 'var(--kelly)', padding: '10px 12px', textAlign: 'left', background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid var(--line)' };
+const TD = { ...MONO, fontSize: 12, color: 'var(--chalk)', padding: '10px 12px', borderBottom: '1px solid rgba(77,189,92,0.08)' };
+
 export default function Picks({ tournamentId, user, onWagerPlaced }) {
-  const [golfers, setGolfers]       = useState([]);
-  const [round, setRound]           = useState(1);
-  const [bankroll, setBankroll]     = useState(null);
-  const [activeBet, setActiveBet]   = useState(null); // "golferId_category"
-  const [betAmount, setBetAmount]   = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [flash, setFlash]           = useState(null); // { msg, type }
-  const [loading, setLoading]       = useState(false);
+  const [golfers, setGolfers]             = useState([]);
+  const [round, setRound]                 = useState(1);
+  const [bankroll, setBankroll]           = useState(null);
+  const [activeBet, setActiveBet]         = useState(null);
+  const [betAmount, setBetAmount]         = useState('');
+  const [submitting, setSubmitting]       = useState(false);
+  const [flash, setFlash]                 = useState(null);
+  const [loading, setLoading]             = useState(false);
+  const [wagerWindowOpen, setWagerWindowOpen] = useState(true);
+  const [lockedWagers, setLockedWagers]   = useState([]);
 
   useEffect(() => { if (tournamentId) init(); }, [tournamentId]);
   useEffect(() => { if (tournamentId) loadRound(round); }, [round]);
 
   async function init() {
-    const { data: setting } = await supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle();
+    const [{ data: setting }, { data: wwSetting }] = await Promise.all([
+      supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle(),
+      supabase.from('settings').select('value').eq('key', 'golf_wager_window_open').maybeSingle(),
+    ]);
     const activeRound = parseInt(setting?.value || '1');
+    const isOpen = wwSetting?.value !== 'false';
+    setWagerWindowOpen(isOpen);
     setRound(activeRound);
+
+    if (!isOpen) {
+      // Load all pending wagers for locked transparency view
+      try {
+        const wagers = await getWagersForRound(tournamentId, activeRound);
+        setLockedWagers((wagers || []).filter(w => w.result === 'pending'));
+      } catch (e) {
+        console.warn('Could not load locked wagers:', e.message);
+      }
+    }
   }
 
   async function loadRound(r) {
@@ -52,12 +73,10 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
     } finally {
       setLoading(false);
     }
-    // Bankroll is loaded separately so a failure here never blocks the golfer list
     try {
       const b = await ensureBankroll(tournamentId, r, user.email);
       setBankroll(b);
     } catch (e) {
-      // Non-fatal — bankroll display just won't show
       console.warn('Bankroll load failed:', e.message);
     }
   }
@@ -111,6 +130,56 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
 
   const withOdds    = golfers.filter(g => Object.keys(g.odds || {}).length > 0);
   const withoutOdds = golfers.filter(g => !Object.keys(g.odds || {}).length);
+
+  // ── Locked picks view ─────────────────────────────────────
+  if (!wagerWindowOpen) {
+    return (
+      <div style={{ maxWidth: 800, margin: '0 auto', padding: '0 0 40px' }}>
+        {/* Locked banner */}
+        <div style={{ background: 'rgba(231,76,60,0.12)', border: '1px solid rgba(231,76,60,0.4)', padding: '20px 24px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ fontSize: 28 }}>🔒</div>
+          <div>
+            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 2, color: 'var(--red)', marginBottom: 4 }}>WAGER WINDOW CLOSED</div>
+            <div style={{ ...MONO, fontSize: 12, color: 'var(--chalk-dim)' }}>The commissioner has locked picks for this round. Check back when the window reopens.</div>
+          </div>
+        </div>
+
+        {/* Pending wagers transparency table */}
+        {lockedWagers.length > 0 && (
+          <div>
+            <div style={{ ...MONO, fontSize: 11, letterSpacing: 2, color: 'var(--chalk-dim)', marginBottom: 12 }}>PENDING WAGERS — ROUND {round}</div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={TH}>PLAYER</th>
+                    <th style={TH}>GOLFER</th>
+                    <th style={TH}>CATEGORY</th>
+                    <th style={{ ...TH, textAlign: 'right' }}>WAGERED</th>
+                    <th style={{ ...TH, textAlign: 'right' }}>TO WIN</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lockedWagers.map(w => (
+                    <tr key={w.id}>
+                      <td style={TD}>{w.player_name || w.user_email}</td>
+                      <td style={TD}>{w.golf_golfers?.name || '—'}</td>
+                      <td style={{ ...TD, textTransform: 'uppercase', letterSpacing: 1 }}>{w.category}</td>
+                      <td style={{ ...TD, textAlign: 'right', color: 'var(--gold)' }}>{w.points_wagered}</td>
+                      <td style={{ ...TD, textAlign: 'right', color: 'var(--chalk-dim)' }}>{calcToWin(w.points_wagered, w.odds_at_time) ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        {lockedWagers.length === 0 && (
+          <div className="empty-state">No wagers placed for this round yet.</div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', padding: '0 0 40px' }}>
@@ -201,52 +270,67 @@ function GolferCard({ golfer, activeBet, betAmount, submitting, onToggleBet, onB
     ? activeBet.slice(`${golfer.id}_`.length)
     : null;
 
+  const isCut = golfer.made_cut === false;
+
   return (
     <div style={{
       background: 'var(--hardwood)',
-      border: '1px solid var(--line)',
+      border: isCut ? '1px solid rgba(231,76,60,0.3)' : '1px solid var(--line)',
       borderRadius: 2,
       marginBottom: 10,
       overflow: 'hidden',
+      opacity: isCut ? 0.6 : 1,
     }}>
       {/* Golfer name + bet buttons */}
       <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', gap: 16, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 160, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, letterSpacing: 1, color: 'var(--chalk)', fontWeight: 600 }}>
-          {golfer.name}
+        <div style={{ flex: 1, minWidth: 160, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, letterSpacing: 1, color: isCut ? 'var(--chalk-dim)' : 'var(--chalk)', fontWeight: 600, textDecoration: isCut ? 'line-through' : 'none' }}>
+            {golfer.name}
+          </span>
+          {isCut && (
+            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 1, padding: '2px 8px', background: 'rgba(231,76,60,0.15)', border: '1px solid rgba(231,76,60,0.4)', color: 'var(--red)' }}>
+              CUT
+            </span>
+          )}
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {CATS.map(({ key, label }) => {
-            const odds = golfer.odds?.[key];
-            if (!odds) return null;
-            const isActive = activeBet === `${golfer.id}_${key}`;
-            return (
-              <button
-                key={key}
-                onClick={() => onToggleBet(golfer.id, key)}
-                style={{
-                  fontFamily: "'Barlow Condensed', sans-serif",
-                  fontWeight: 700,
-                  fontSize: 13,
-                  letterSpacing: 1,
-                  padding: '8px 14px',
-                  border: isActive ? '1px solid var(--kelly)' : '1px solid var(--line)',
-                  background: isActive ? 'rgba(77,189,92,0.15)' : 'rgba(255,255,255,0.04)',
-                  color: isActive ? 'var(--kelly)' : 'var(--chalk)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                  textTransform: 'uppercase',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {label} <span style={{ color: isActive ? 'var(--kelly)' : 'var(--gold)' }}>{fmtOdds(odds)}</span>
-              </button>
-            );
-          })}
-        </div>
+        {!isCut && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {CATS.map(({ key, label }) => {
+              const odds = golfer.odds?.[key];
+              if (!odds) return null;
+              const isActive = activeBet === `${golfer.id}_${key}`;
+              return (
+                <button
+                  key={key}
+                  onClick={() => onToggleBet(golfer.id, key)}
+                  style={{
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    letterSpacing: 1,
+                    padding: '8px 14px',
+                    border: isActive ? '1px solid var(--kelly)' : '1px solid var(--line)',
+                    background: isActive ? 'rgba(77,189,92,0.15)' : 'rgba(255,255,255,0.04)',
+                    color: isActive ? 'var(--kelly)' : 'var(--chalk)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                    textTransform: 'uppercase',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {label} <span style={{ color: isActive ? 'var(--kelly)' : 'var(--gold)' }}>{fmtOdds(odds)}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {isCut && (
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--red)', letterSpacing: 1 }}>MISSED CUT — BETS UNAVAILABLE</div>
+        )}
       </div>
 
-      {/* Inline bet input — only shown when this golfer has an active category */}
-      {activeCategory && (
+      {/* Inline bet input */}
+      {activeCategory && !isCut && (
         <div style={{
           borderTop: '1px solid var(--line)',
           background: 'rgba(77,189,92,0.05)',

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer } from '../../lib/supabaseGolf.js';
+import { addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer, toggleGolferCut, completeTournament } from '../../lib/supabaseGolf.js';
 import { supabase } from '../../lib/supabaseClient.js';
 import SettleRound from './SettleRound.jsx';
 
@@ -448,7 +448,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
             <thead>
               <tr style={{ background: 'rgba(0,0,0,0.3)' }}>
                 <th style={STYLES.th}>GOLFER NAME</th>
-                <th style={STYLES.th}>TOURNAMENT ID</th>
+                <th style={STYLES.th}>CUT STATUS</th>
                 <th style={STYLES.th}>ACTION</th>
               </tr>
             </thead>
@@ -459,7 +459,26 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
                 golfers.map(g => (
                   <tr key={g.id}>
                     <td style={STYLES.td}>{g.name}</td>
-                    <td style={STYLES.td}>{g.tournament_id}</td>
+                    <td style={STYLES.td}>
+                      <button
+                        onClick={async () => {
+                          const newCut = g.made_cut === false ? true : false;
+                          try {
+                            await toggleGolferCut(g.id, newCut);
+                            await loadData();
+                          } catch (e) { setError(e.message); }
+                        }}
+                        style={{
+                          ...STYLES.btn, ...STYLES.btnSm,
+                          background: g.made_cut === false ? 'rgba(231,76,60,0.15)' : 'rgba(77,189,92,0.1)',
+                          border: g.made_cut === false ? '1px solid rgba(231,76,60,0.4)' : '1px solid rgba(77,189,92,0.3)',
+                          color: g.made_cut === false ? 'var(--red)' : 'var(--kelly)',
+                        }}
+                        disabled={loading}
+                      >
+                        {g.made_cut === false ? '✕ MISSED CUT' : '✓ ACTIVE'}
+                      </button>
+                    </td>
                     <td style={STYLES.td}>
                       <button
                         onClick={() => handleDeleteGolfer(g.id)}
@@ -685,7 +704,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
         </div>
 
         {/* Active Kelly Round */}
-        <div style={{ background: 'rgba(77,189,92,0.05)', border: '1px solid rgba(77,189,92,0.15)', padding: 16 }}>
+        <div style={{ background: 'rgba(77,189,92,0.05)', border: '1px solid rgba(77,189,92,0.15)', padding: 16, marginBottom: 16 }}>
           <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--chalk-dim)', letterSpacing: 1, marginBottom: 8 }}>ACTIVE KELLY ROUND</div>
           <select
             value={activeGolfRound}
@@ -697,6 +716,32 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
             <option value="2">Round 2</option>
             <option value="3">Round 3</option>
           </select>
+        </div>
+
+        {/* Complete Tournament */}
+        <div style={{ background: 'rgba(240,192,64,0.05)', border: '1px solid rgba(240,192,64,0.2)', padding: 16 }}>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--chalk-dim)', letterSpacing: 1, marginBottom: 6 }}>TOURNAMENT COMPLETE</div>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--chalk-dim)', marginBottom: 12, lineHeight: 1.6 }}>
+            After settling Round 3, mark the tournament as complete. This shows a Final Standings page to all players.
+          </div>
+          <button
+            style={{ ...STYLES.btn, background: 'var(--gold)', color: '#0a1a0e' }}
+            disabled={loading || !tournamentId}
+            onClick={async () => {
+              if (!window.confirm('Mark this tournament as COMPLETE?\n\nThis will show the Final Standings view to all players. This cannot be undone.')) return;
+              setLoading(true);
+              try {
+                await completeTournament(tournamentId);
+                flashSettings('Tournament marked as complete. Final Standings are now live.');
+              } catch (e) {
+                setError(e.message);
+              } finally {
+                setLoading(false);
+              }
+            }}
+          >
+            🏆 MARK TOURNAMENT COMPLETE
+          </button>
         </div>
       </div>
 
