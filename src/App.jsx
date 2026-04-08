@@ -324,7 +324,7 @@ function AppInner() {
   const loadAppData = async () => {
     const [cr, sp, rs, tc, rl, appMode, activeGolfTournamentId] = await Promise.all([DB.currentRound(), DB.startingPoints(), DB.roundStatus(), DB.getSetting('tournament_complete'), DB.registrationLocked(), DB.getSetting('app_mode'), DB.getActiveGolfTournamentId()]);
     setAppData({ currentRound:cr, startingPoints:sp, roundStatus:rs, tournamentComplete: tc === 'true', registrationLocked: rl });
-    if (appMode) setMode(appMode);
+    if (appMode) { setMode(appMode); try { localStorage.setItem('kelly_mode', appMode); } catch(e) {} }
     if (activeGolfTournamentId) setGolfTournamentId(activeGolfTournamentId);
     // Also refresh current user from DB so points are always fresh
     const saved = sessionStorage.getItem('kelly_session');

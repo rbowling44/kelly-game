@@ -3,16 +3,14 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 const GolfModeContext = createContext(null);
 
 export function GolfModeProvider({ children, initial = 'ncaam' }) {
-  const [mode, setMode] = useState(initial);
-
-  useEffect(() => {
+  const [mode, setMode] = useState(() => {
     try {
       const stored = localStorage.getItem('kelly_mode');
-      if (stored) setMode(stored);
+      return stored || initial;
     } catch (e) {
-      // ignore
+      return initial;
     }
-  }, []);
+  });
 
   useEffect(() => {
     try {
