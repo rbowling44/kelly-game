@@ -144,7 +144,7 @@ async function getOddsForGolfer(golfer_id, kelly_round) {
 }
 
 async function getPlayerBankrollsForRound(tournament_id, kelly_round) {
-  const { data: users, error: usersErr } = await supabase.from('users').select('email, name');
+  const { data: users, error: usersErr } = await supabase.from('users').select('email, name, paid');
   if (usersErr) throw usersErr;
   const { data: bankrolls, error: bErr } = await supabase.from('golf_bankrolls').select('*').eq('tournament_id', tournament_id).eq('kelly_round', kelly_round);
   if (bErr) throw bErr;
@@ -160,6 +160,7 @@ async function getPlayerBankrollsForRound(tournament_id, kelly_round) {
       user_id: u.email,
       email: u.email,
       name: u.name,
+      paid: u.paid || false,
       starting_points: bankroll?.starting_points || 0,
       points_remaining: bankroll?.points_remaining || 0,
       wager_count: wagerCounts[u.email] || 0

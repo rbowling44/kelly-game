@@ -17,6 +17,8 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
   const [selectedRound, setSelectedRound] = useState(activeKellyRound);
   
   const [players, setPlayers] = useState([]);
+  const [editPts, setEditPts] = useState({});
+  const [editPwd, setEditPwd] = useState({});
 
   // Game settings state
   const [golfStartingPoints, setGolfStartingPoints] = useState('500');
@@ -46,7 +48,64 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
     const val = parseInt(golfStartingPoints);
     if (!val || val < 1) return flashSettings('Enter a valid number.');
     await supabase.from('settings').upsert({ key: 'golf_starting_points', value: val.toString() });
-    flashSettings(`Starting points set to ${val}.`);
+
+    // Auto-create bankrolls for all non-admin users who don't have one yet
+    if (tournamentId) {
+      const { data: allUsers } = await supabase.from('users').select('email').eq('is_admin', false);
+      const { data: existing } = await supabase.from('golf_bankrolls').select('user_id').eq('tournament_id', tournamentId).eq('kelly_round', 1);
+      const existingSet = new Set((existing || []).map(b => b.user_id));
+      const toInsert = (allUsers || [])
+        .filter(u => !existingSet.has(u.email))
+        .map(u => ({ user_id: u.email, tournament_id: tournamentId, kelly_round: 1, starting_points: val, points_remaining: val }));
+      if (toInsert.length) {
+        await supabase.from('golf_bankrolls').insert(toInsert);
+      }
+      await loadData();
+    }
+    flashSettings(`Starting points set to ${val}. Bankrolls created for all players.`);
+  };
+
+  const handleTogglePaid = async (email) => {
+    const p = players.find(x => x.email === email);
+    const paid = !p.paid;
+    await supabase.from('users').update({ paid }).eq('email', email);
+    setPlayers(prev => prev.map(x => x.email === email ? { ...x, paid } : x));
+    flashSuccess(`${p.name} marked as ${paid ? 'PAID' : 'UNPAID'}.`);
+  };
+
+  const handleOverridePoints = async (email) => {
+    const val = parseInt(editPts[email]);
+    if (isNaN(val) || val < 0) return flashSuccess('Enter a valid point value.');
+    const p = players.find(x => x.email === email);
+    const { error } = await supabase.from('golf_bankrolls')
+      .update({ points_remaining: val })
+      .eq('user_id', email)
+      .eq('tournament_id', tournamentId)
+      .eq('kelly_round', selectedRound);
+    if (error) return setError(error.message);
+    setEditPts(prev => ({ ...prev, [email]: '' }));
+    setPlayers(prev => prev.map(x => x.email === email ? { ...x, points_remaining: val } : x));
+    flashSuccess(`Updated ${p.name} to ${val} pts.`);
+  };
+
+  const handleResetPassword = async (email) => {
+    const newPwd = editPwd[email]?.trim();
+    if (!newPwd || newPwd.length < 4) return setError('Password must be at least 4 characters.');
+    const p = players.find(x => x.email === email);
+    await supabase.from('users').update({ password: btoa(newPwd) }).eq('email', email);
+    setEditPwd(prev => ({ ...prev, [email]: '' }));
+    flashSuccess(`Password reset for ${p.name}.`);
+  };
+
+  const handleDeletePlayer = async (email) => {
+    const p = players.find(x => x.email === email);
+    if (!window.confirm(`Remove ${p?.name} from this golf tournament?\n\nThis deletes their bankroll and wagers for this tournament only. Their account is kept.`)) return;
+    await Promise.all([
+      supabase.from('golf_bankrolls').delete().eq('user_id', email).eq('tournament_id', tournamentId),
+      supabase.from('golf_wagers').delete().eq('user_id', email).eq('tournament_id', tournamentId),
+    ]);
+    setPlayers(prev => prev.filter(x => x.email !== email));
+    flashSuccess(`${p?.name} removed from tournament.`);
   };
 
   const saveWagerWindow = async (val) => {
@@ -481,37 +540,72 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
 
       {/* ========================= PLAYER LIST ========================= */}
       <div style={STYLES.section}>
-        <div style={STYLES.title}>PLAYER LIST</div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={STYLES.table}>
-            <thead>
-              <tr style={{ background: 'rgba(0,0,0,0.3)' }}>
-                <th style={STYLES.th}>PLAYER NAME</th>
-                <th style={STYLES.th}>EMAIL</th>
-                <th style={STYLES.th}>STARTING PTS</th>
-                <th style={STYLES.th}>REMAINING PTS</th>
-                <th style={STYLES.th}>WAGERS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {players.length === 0 ? (
-                <tr><td style={STYLES.td} colSpan="5">No players yet</td></tr>
-              ) : (
-                players.map(p => (
-                  <tr key={p.user_id}>
-                    <td style={STYLES.td}>{p.name || 'Unknown'}</td>
-                    <td style={STYLES.td}>{p.email}</td>
-                    <td style={{ ...STYLES.td, color: 'var(--gold)' }}>{p.starting_points}</td>
-                    <td style={{ ...STYLES.td, color: p.points_remaining >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                      {p.points_remaining}
-                    </td>
-                    <td style={STYLES.td}>{p.wager_count}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <div style={STYLES.title}>PLAYER LIST ({players.length})</div>
+        {players.length === 0 ? (
+          <div style={{ color: 'var(--chalk-dim)', fontFamily: "'DM Mono', monospace", fontSize: 12 }}>No players yet.</div>
+        ) : (
+          players.map(p => (
+            <div key={p.user_id} style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(77,189,92,0.1)', padding: '14px 16px', marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+              {/* Name + email */}
+              <div style={{ flex: 1, minWidth: 140 }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 600, fontSize: 16, color: 'var(--chalk)' }}>{p.name || 'Unknown'}</div>
+                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: 'var(--chalk-dim)' }}>{p.email}</div>
+              </div>
+
+              {/* Points remaining */}
+              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, color: 'var(--gold)', whiteSpace: 'nowrap' }}>
+                {p.points_remaining} <span style={{ fontSize: 10, color: 'var(--chalk-dim)' }}>/ {p.starting_points} PTS</span>
+              </div>
+
+              {/* Paid toggle */}
+              <button
+                onClick={() => handleTogglePaid(p.email)}
+                style={{
+                  fontFamily: "'DM Mono', monospace", fontSize: 11, padding: '4px 12px', cursor: 'pointer',
+                  background: p.paid ? 'rgba(77,189,92,0.15)' : 'rgba(231,76,60,0.15)',
+                  border: p.paid ? '1px solid rgba(77,189,92,0.4)' : '1px solid rgba(231,76,60,0.4)',
+                  color: p.paid ? 'var(--kelly)' : 'var(--red)', letterSpacing: 1,
+                }}
+              >{p.paid ? '✓ PAID' : '✕ UNPAID'}</button>
+
+              {/* Points override */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: 'var(--chalk-dim)' }}>PTS OVERRIDE</div>
+                <input
+                  type="number" min="0" placeholder={p.points_remaining.toString()}
+                  value={editPts[p.email] ?? ''}
+                  onChange={e => setEditPts(prev => ({ ...prev, [p.email]: e.target.value }))}
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--line)', color: 'var(--chalk)', padding: '5px 10px', fontFamily: "'DM Mono', monospace", fontSize: 13, width: 80, outline: 'none' }}
+                />
+                <button
+                  onClick={() => handleOverridePoints(p.email)}
+                  style={{ ...STYLES.btn, ...STYLES.btnKelly, ...STYLES.btnSm, marginBottom: 0, opacity: editPts[p.email] ? 1 : 0.4 }}
+                >SET</button>
+              </div>
+
+              {/* Password reset */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: 'var(--chalk-dim)' }}>NEW PASSWORD</div>
+                <input
+                  type="text" placeholder="new password"
+                  value={editPwd[p.email] ?? ''}
+                  onChange={e => setEditPwd(prev => ({ ...prev, [p.email]: e.target.value }))}
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--line)', color: 'var(--chalk)', padding: '5px 10px', fontFamily: "'DM Mono', monospace", fontSize: 13, width: 130, outline: 'none' }}
+                />
+                <button
+                  onClick={() => handleResetPassword(p.email)}
+                  style={{ ...STYLES.btn, ...STYLES.btnGhost, ...STYLES.btnSm, marginBottom: 0, fontSize: 11, opacity: editPwd[p.email] ? 1 : 0.4 }}
+                >RESET</button>
+              </div>
+
+              {/* Delete from tournament */}
+              <button
+                onClick={() => handleDeletePlayer(p.email)}
+                style={{ ...STYLES.btn, ...STYLES.btnGhost, ...STYLES.btnSm, marginBottom: 0, marginLeft: 'auto', color: 'var(--red)', borderColor: 'rgba(231,76,60,0.3)', fontSize: 11 }}
+              >✕ REMOVE</button>
+            </div>
+          ))
+        )}
       </div>
 
       {/* ========================= GAME SETTINGS ========================= */}
