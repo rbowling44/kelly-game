@@ -421,7 +421,7 @@ function AppInner() {
         {tab==='rules'         && !liveUser.is_admin && (mode==='golf' ? <RulesGolf /> : <RulesView         user={liveUser} appData={appData} />)}
         {tab==='admin'         &&  liveUser.is_admin && <AdminView         appData={appData} onRefresh={loadAppData} />}
         {tab==='tracker'       &&  liveUser.is_admin && (mode==='golf' ? <GolfRoundTracker tournamentId={golfTournamentId} /> : <RoundTrackerView  appData={appData} />)}
-        {tab==='wagers'        &&  liveUser.is_admin && <WagerLogView />}
+        {tab==='wagers'        &&  liveUser.is_admin && (mode==='golf' ? <WagerLogGolf tournamentId={golfTournamentId} /> : <WagerLogView />)}
         {tab==='notifications' &&  liveUser.is_admin && <NotificationsView onRefresh={refreshUnread} />}
       </main>
     </div>
