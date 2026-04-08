@@ -15,9 +15,48 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
   
   const [players, setPlayers] = useState([]);
 
+  // Game settings state
+  const [golfStartingPoints, setGolfStartingPoints] = useState('500');
+  const [wagerWindowOpen, setWagerWindowOpen] = useState('true');
+  const [activeGolfRound, setActiveGolfRound] = useState('1');
+  const [settingsMsg, setSettingsMsg] = useState('');
+
   useEffect(() => {
     loadData();
+    loadSettings();
   }, [tournamentId, selectedRound]);
+
+  const loadSettings = async () => {
+    const [sp, ww, ar] = await Promise.all([
+      supabase.from('settings').select('value').eq('key', 'golf_starting_points').single(),
+      supabase.from('settings').select('value').eq('key', 'golf_wager_window_open').single(),
+      supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').single(),
+    ]);
+    if (sp.data?.value) setGolfStartingPoints(sp.data.value);
+    if (ww.data?.value) setWagerWindowOpen(ww.data.value);
+    if (ar.data?.value) setActiveGolfRound(ar.data.value);
+  };
+
+  const flashSettings = (msg) => { setSettingsMsg(msg); setTimeout(() => setSettingsMsg(''), 3000); };
+
+  const saveGolfStartingPoints = async () => {
+    const val = parseInt(golfStartingPoints);
+    if (!val || val < 1) return flashSettings('Enter a valid number.');
+    await supabase.from('settings').upsert({ key: 'golf_starting_points', value: val.toString() });
+    flashSettings(`Starting points set to ${val}.`);
+  };
+
+  const saveWagerWindow = async (val) => {
+    setWagerWindowOpen(val);
+    await supabase.from('settings').upsert({ key: 'golf_wager_window_open', value: val });
+    flashSettings(`Wager window ${val === 'true' ? 'opened' : 'closed'}.`);
+  };
+
+  const saveActiveKellyRound = async (val) => {
+    setActiveGolfRound(val);
+    await supabase.from('settings').upsert({ key: 'golf_active_kelly_round', value: val });
+    flashSettings(`Active Kelly Round set to ${val}.`);
+  };
 
   const loadData = async () => {
     try {
@@ -466,6 +505,66 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* ========================= GAME SETTINGS ========================= */}
+      <div style={STYLES.section}>
+        <div style={STYLES.title}>GAME SETTINGS</div>
+        {settingsMsg && <div style={{ background: 'rgba(77,189,92,0.15)', border: '1px solid rgba(77,189,92,0.4)', color: 'var(--kelly)', padding: '10px', marginBottom: '12px', fontSize: '12px', fontFamily: "'DM Mono', monospace" }}>{settingsMsg}</div>}
+
+        {/* Starting Points */}
+        <div style={{ background: 'rgba(77,189,92,0.05)', border: '1px solid rgba(77,189,92,0.15)', padding: 16, marginBottom: 16 }}>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--chalk-dim)', letterSpacing: 1, marginBottom: 8 }}>STARTING POINTS (KELLY ROUND 1)</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              type="number"
+              min="1"
+              value={golfStartingPoints}
+              onChange={e => setGolfStartingPoints(e.target.value)}
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--line)', color: 'var(--chalk)', padding: '8px 12px', fontFamily: "'DM Mono', monospace", fontSize: 18, width: 120, outline: 'none' }}
+              disabled={loading}
+            />
+            <button style={{ ...STYLES.btn, ...STYLES.btnKelly }} onClick={saveGolfStartingPoints} disabled={loading}>SAVE</button>
+            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--chalk-dim)' }}>Each player's bankroll at Round 1 start</span>
+          </div>
+        </div>
+
+        {/* Wager Window */}
+        <div style={{ background: wagerWindowOpen === 'true' ? 'rgba(77,189,92,0.05)' : 'rgba(231,76,60,0.06)', border: wagerWindowOpen === 'true' ? '1px solid rgba(77,189,92,0.15)' : '1px solid rgba(231,76,60,0.3)', padding: 16, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--chalk-dim)', letterSpacing: 1, marginBottom: 4 }}>WAGER WINDOW</div>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: wagerWindowOpen === 'true' ? 'var(--kelly)' : 'var(--red)' }}>
+              {wagerWindowOpen === 'true' ? 'OPEN — Players can place wagers' : 'CLOSED — Wagers are disabled'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              style={{ ...STYLES.btn, ...(wagerWindowOpen === 'true' ? STYLES.btnKelly : STYLES.btnGhost) }}
+              onClick={() => saveWagerWindow('true')}
+              disabled={loading}
+            >OPEN</button>
+            <button
+              style={{ ...STYLES.btn, ...(wagerWindowOpen === 'false' ? { background: 'var(--red)', color: '#fff' } : STYLES.btnGhost) }}
+              onClick={() => saveWagerWindow('false')}
+              disabled={loading}
+            >CLOSED</button>
+          </div>
+        </div>
+
+        {/* Active Kelly Round */}
+        <div style={{ background: 'rgba(77,189,92,0.05)', border: '1px solid rgba(77,189,92,0.15)', padding: 16 }}>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--chalk-dim)', letterSpacing: 1, marginBottom: 8 }}>ACTIVE KELLY ROUND</div>
+          <select
+            value={activeGolfRound}
+            onChange={e => saveActiveKellyRound(e.target.value)}
+            style={{ ...STYLES.input, width: 160 }}
+            disabled={loading}
+          >
+            <option value="1">Round 1</option>
+            <option value="2">Round 2</option>
+            <option value="3">Round 3</option>
+          </select>
         </div>
       </div>
     </div>
