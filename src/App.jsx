@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from './lib/supabaseClient.js';
 import { GolfModeProvider, useGolfMode } from './contexts/GolfModeContext.jsx';
 import GolfModeToggle from './components/admin/GolfModeToggle.jsx';
+import GolfModeAdmin from "./components/admin/GolfModeAdmin";
 import GolfRoundTracker from './components/admin/GolfRoundTracker.jsx';
 import PicksGolf from './components/golf/Picks.jsx';
 import LeaderboardGolf from './components/golf/Leaderboard.jsx';
