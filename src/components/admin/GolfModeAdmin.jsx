@@ -9,6 +9,9 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
   const [showBulk, setShowBulk] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+
+  const flashSuccess = (msg) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(''), 3000); };
   
   const [oddsData, setOddsData] = useState({});
   const [selectedRound, setSelectedRound] = useState(activeKellyRound);
@@ -154,6 +157,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
         odds.top10 ? saveGolferOdds(tournamentId, golferId, selectedRound, 'top10', odds.top10) : null,
       ].filter(p => p));
       setError('');
+      flashSuccess('Odds saved!');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -173,6 +177,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
         ].filter(p => p));
       }
       setError('');
+      flashSuccess('All odds saved!');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -286,6 +291,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
   return (
     <div style={{ maxWidth: '1200px' }}>
       {error && <div style={STYLES.errorMsg}>{error}</div>}
+      {successMsg && <div style={{ background: 'rgba(77,189,92,0.15)', border: '1px solid rgba(77,189,92,0.4)', color: 'var(--kelly)', padding: '10px', marginBottom: '12px', fontSize: '12px', fontFamily: "'DM Mono', monospace" }}>{successMsg}</div>}
 
       {/* ========================= GOLFER MANAGEMENT ========================= */}
       <div style={STYLES.section}>

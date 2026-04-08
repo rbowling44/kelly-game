@@ -167,6 +167,28 @@ async function getPlayerBankrollsForRound(tournament_id, kelly_round) {
   });
 }
 
+async function ensureBankroll(tournament_id, kelly_round, user_id) {
+  const { data: existing } = await supabase
+    .from('golf_bankrolls')
+    .select('id, starting_points, points_remaining')
+    .eq('tournament_id', tournament_id)
+    .eq('kelly_round', kelly_round)
+    .eq('user_id', user_id)
+    .single();
+  if (existing) return existing;
+
+  const { data: setting } = await supabase.from('settings').select('value').eq('key', 'golf_starting_points').single();
+  const startPts = parseInt(setting?.value || '500');
+
+  const { data, error } = await supabase
+    .from('golf_bankrolls')
+    .insert({ tournament_id, kelly_round, user_id, starting_points: startPts, points_remaining: startPts })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 async function getWagersForRound(tournament_id, kelly_round) {
   const { data, error } = await supabase
     .from('golf_wagers')
@@ -185,4 +207,4 @@ async function getWagersForRound(tournament_id, kelly_round) {
   return (data || []).map(w => ({ ...w, player_name: userMap[w.user_id] || 'Unknown' }));
 }
 
-export { placeWager, settleRound, upsertGolfers, upsertOdds, getTournament, getGolfersWithOdds, getUserWagers, getWagerLog, syncLeaderboardToGolfers, getLeaderboard, addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer, getPlayerBankrollsForRound, getWagersForRound };
+export { placeWager, settleRound, upsertGolfers, upsertOdds, getTournament, getGolfersWithOdds, getUserWagers, getWagerLog, syncLeaderboardToGolfers, getLeaderboard, addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer, getPlayerBankrollsForRound, getWagersForRound, ensureBankroll };
