@@ -265,6 +265,8 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
           <li>All picks must be made before first tee time of the day</li>
           <li>Leader, Top 5, and Top 10 refer to how the golfer finished that Kelly Round</li>
           <li>Kelly Round 1 is cumulative Thurs/Fri &nbsp;|&nbsp; Round 2 is Saturday &nbsp;|&nbsp; Round 3 is Sunday</li>
+          <li>You will receive your winning points from Round 1 after the completion of Friday's tee times</li>
+          <li>You will receive your winning points from Round 2 after the completion of Saturday's tee times</li>
           <li><strong style={{ color: 'var(--red)' }}>⚠️ Any unused points in a round will be forfeited</strong></li>
         </ul>
       </div>
