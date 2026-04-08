@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer } from '../../lib/supabaseGolf.js';
 import { supabase } from '../../lib/supabaseClient.js';
+import SettleRound from './SettleRound.jsx';
 
 export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
   const [golfers, setGolfers] = useState([]);
@@ -698,6 +699,9 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
           </select>
         </div>
       </div>
+
+      {/* ========================= SETTLE ROUND ========================= */}
+      <SettleRound tournamentId={tournamentId} />
 
       {/* ========================= DANGER ZONE ========================= */}
       <div style={{ background: 'rgba(231,76,60,0.05)', border: '1px solid rgba(231,76,60,0.2)', padding: 20, marginBottom: 20 }}>

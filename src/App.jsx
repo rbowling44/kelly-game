@@ -386,7 +386,7 @@ function AppInner() {
   const logout = () => { setUser(null); sessionStorage.removeItem('kelly_session'); setTab("picks"); };
 
   if (loading) return <div className="loading"><span className="spinner"/>LOADING THE KELLY GAME...</div>;
-  if (!user)   return <AuthScreen onLogin={login} registrationLocked={appData.registrationLocked} />;
+  if (!user)   return <AuthScreen onLogin={login} registrationLocked={appData.registrationLocked} golfMode={mode === 'golf'} golfTournamentId={golfTournamentId} />;
 
   // Use freshUser points from DB if available via session
   const savedSession = sessionStorage.getItem('kelly_session');
@@ -448,11 +448,14 @@ function AppInner() {
 // ============================================================
 // AUTH
 // ============================================================
-function AuthScreen({ onLogin, registrationLocked }) {
+function AuthScreen({ onLogin, registrationLocked, golfMode, golfTournamentId }) {
   const [mode, setMode]   = useState("login");
   const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [name, setName] = useState("");
   const [forgotEmail, setForgotEmail] = useState("");
   const [error, setError] = useState(""); const [info, setInfo] = useState(""); const [busy, setBusy] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(false);
+  const [rulesTab, setRulesTab] = useState("ncaa");
+
   const submit = async () => {
     setError(""); setBusy(true);
     if (!email || !password) { setError("Email and password required."); setBusy(false); return; }
@@ -468,6 +471,18 @@ function AuthScreen({ onLogin, registrationLocked }) {
       const [cr, sp] = await Promise.all([DB.currentRound(), DB.startingPoints()]);
       const newUser = { email: email.toLowerCase(), name, password: btoa(password), is_admin: false, rounds: {[cr]: sp}, history: [] };
       await DB.upsertUser(newUser);
+      // If golf mode is active, create Round 1 bankroll for this new player
+      if (golfMode && golfTournamentId) {
+        const { data: gsp } = await supabase.from('settings').select('value').eq('key', 'golf_starting_points').maybeSingle();
+        const startPts = parseInt(gsp?.value || '500');
+        await supabase.from('golf_bankrolls').insert({
+          tournament_id: Number(golfTournamentId),
+          kelly_round: 1,
+          user_email: email.toLowerCase(),
+          starting_points: startPts,
+          points_remaining: startPts,
+        });
+      }
       onLogin(newUser);
     }
     setBusy(false);
@@ -480,6 +495,61 @@ function AuthScreen({ onLogin, registrationLocked }) {
     await DB.addNotification({ type:'forgot_password', email:forgotEmail.toLowerCase(), name:u.name, message:`${u.name} (${forgotEmail}) requested a password reset.`, read:false });
     setInfo("Request sent! The commissioner will reset your password shortly."); setBusy(false);
   };
+
+  // ── Rules Modal ─────────────────────────────────────────────
+  const RulesModal = () => (
+    <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.88)',zIndex:999,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'24px',overflowY:'auto'}}>
+      <div style={{background:'var(--hardwood)',border:'1px solid var(--kelly)',width:'100%',maxWidth:640,position:'relative'}}>
+        {/* modal header */}
+        <div style={{background:'rgba(0,0,0,0.3)',padding:'16px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',borderBottom:'2px solid var(--kelly)'}}>
+          <div style={{fontFamily:'Bebas Neue,sans-serif',fontSize:24,letterSpacing:3,color:'var(--kelly)'}}>THE KELLY GAME · RULES</div>
+          <button onClick={()=>setShowRulesModal(false)} style={{background:'none',border:'1px solid var(--line)',color:'var(--chalk-dim)',cursor:'pointer',fontFamily:'DM Mono,monospace',fontSize:11,padding:'4px 10px',letterSpacing:1}}>✕ CLOSE</button>
+        </div>
+        {/* tabs */}
+        <div style={{display:'flex',borderBottom:'1px solid var(--line)'}}>
+          {['ncaa','golf'].map(t=>(
+            <button key={t} onClick={()=>setRulesTab(t)} style={{flex:1,padding:'12px',background:'none',border:'none',borderBottom:rulesTab===t?'3px solid var(--kelly)':'3px solid transparent',color:rulesTab===t?'var(--kelly)':'var(--chalk-dim)',fontFamily:'Bebas Neue,sans-serif',fontSize:16,letterSpacing:2,cursor:'pointer',transition:'all 0.15s'}}>
+              {t==='ncaa'?'NCAA TOURNAMENT':'GOLF / MASTERS'}
+            </button>
+          ))}
+        </div>
+        {/* content */}
+        <div style={{padding:'20px',maxHeight:'65vh',overflowY:'auto'}}>
+          {rulesTab==='ncaa' && (
+            <>
+              <div style={{background:'rgba(77,189,92,0.06)',border:'1px solid rgba(77,189,92,0.2)',padding:16,marginBottom:16,fontFamily:'DM Mono,monospace',fontSize:12,color:'var(--chalk-dim)',lineHeight:1.9}}>
+                <div style={{fontFamily:'Bebas Neue,sans-serif',fontSize:16,letterSpacing:2,color:'var(--kelly)',marginBottom:10}}>THE SHORT VERSION</div>
+                {["1. Every player starts with the same number of points — your bankroll for the game.","2. Each round, pick teams against the point spread and wager your points.","3. Win a pick → earn points equal to your wager. Lose → lose them.","4. Your winnings carry forward — your point total becomes your starting balance next round.","5. You must wager at least 50% of your points each round or forfeit the remainder.","6. The player with the most points after the Championship wins. 🏆"].map((r,i)=><div key={i} style={{marginBottom:4}}>{r}</div>)}
+              </div>
+              {[["PICKING AGAINST THE SPREAD","Every game has a point spread. The favorite must win by more than the spread to cover. The underdog just needs to keep it close or win outright. Example: if Duke is -8.5, they must win by 9+. If you pick Vermont +8.5, Vermont just needs to lose by 8 or fewer."],["THE 50% RULE","You MUST wager at least 50% of your starting points each round across your picks. If you start with 500 pts, you must wager at least 250. Fail to meet the minimum and your unwagered balance is forfeited for that round."],["PICKS LOCK AT TIP-OFF","Once a game tips off, picks for that game close — no changes allowed. Make sure you get your picks in early. The commissioner may also lock the round manually before the first tip."],["WIN / LOSE / PUSH","Win your pick → +wager pts. Lose → -wager pts. If the game lands exactly on the spread (a push) → wager returned, no gain or loss."],["QUESTIONS?","Use the ✉ MSG COMMISSIONER button after logging in to reach the commissioner directly. They have final say on all disputes and scoring corrections."]].map(([title,body])=>(
+                <div key={title} style={{border:'1px solid var(--line)',marginBottom:8,padding:'12px 16px'}}>
+                  <div style={{fontFamily:'Bebas Neue,sans-serif',fontSize:14,letterSpacing:2,color:'var(--chalk)',marginBottom:4}}>{title}</div>
+                  <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)',lineHeight:1.8}}>{body}</div>
+                </div>
+              ))}
+            </>
+          )}
+          {rulesTab==='golf' && (
+            <>
+              <div style={{background:'rgba(77,189,92,0.06)',border:'1px solid rgba(77,189,92,0.2)',padding:16,marginBottom:16,fontFamily:'DM Mono,monospace',fontSize:12,color:'var(--chalk-dim)',lineHeight:1.9}}>
+                <div style={{fontFamily:'Bebas Neue,sans-serif',fontSize:16,letterSpacing:2,color:'var(--kelly)',marginBottom:10}}>THE SHORT VERSION</div>
+                {["1. Three Kelly Rounds tied to the Masters tournament schedule.","2. Each round you start with a fresh bankroll from your previous round winnings.","3. Bet on golfers across three categories: Round Leader, Top 5, Top 10.","4. Use it or lose it — unspent points do NOT carry over.","5. Golfer misses the cut? That bet loses, no exceptions.","6. Most points across all three rounds wins. 🏆"].map((r,i)=><div key={i} style={{marginBottom:4}}>{r}</div>)}
+              </div>
+              {[["⛳ THE THREE KELLY ROUNDS","Round 1 covers Thursday & Friday play. Round 2 is Saturday. Round 3 is Sunday. Each round is a fresh betting window with its own bankroll — your Round 2 bankroll equals your Round 1 winnings, and so on."],["💰 STARTING POINTS","Every player starts Round 1 with 500 points. Round 2 and Round 3 bankrolls are seeded from your previous round's ending balance. Play smart — those points carry real weight."],["🎯 THREE BET CATEGORIES","LEADER: Pick the golfer who leads the round outright. Highest odds, highest reward.\nTOP 5: Pick a golfer who finishes in the top 5 (ties count).\nTOP 10: Pick a golfer who finishes in the top 10 (ties count).\nYou can bet on multiple golfers across all three categories."],["📈 HOW ODDS WORK","Odds are shown in American format. Example: bet 100 pts at +500 = win 500 pts. Bet 100 pts at -200 = win 50 pts. Favorites pay less, longshots pay more. Winnings are added to your ending balance."],["🚫 USE IT OR LOSE IT","Any points you don't wager during a round are GONE. They do not carry forward. Put your points to work or wave goodbye to them."],["✂️ THE CUT RULE","If a golfer misses the cut, any bets placed on them for the round are an automatic loss. Check the tee sheet before betting — not all golfers make the weekend."],["🏆 HOW TO WIN","The overall winner is the player with the most total points accumulated across all three Kelly Rounds. Strategy matters — save firepower for big odds, or play it safe with favorites."]].map(([title,body])=>(
+                <div key={title} style={{border:'1px solid var(--line)',marginBottom:8,padding:'12px 16px'}}>
+                  <div style={{fontFamily:'Bebas Neue,sans-serif',fontSize:14,letterSpacing:2,color:'var(--chalk)',marginBottom:4}}>{title}</div>
+                  <div style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)',lineHeight:1.9,whiteSpace:'pre-line'}}>{body}</div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+        <div style={{padding:'12px 20px',borderTop:'1px solid var(--line)',textAlign:'center'}}>
+          <button onClick={()=>setShowRulesModal(false)} className="btn btn-kelly">GOT IT — BACK TO LOGIN</button>
+        </div>
+      </div>
+    </div>
+  );
 
   if (mode === "forgot") return (
     <div className="auth-wrap"><div className="auth-card">
@@ -497,63 +567,31 @@ function AuthScreen({ onLogin, registrationLocked }) {
     </div></div>
   );
 
-  if (mode === "rules") return (
-    <div className="auth-wrap" style={{alignItems:'flex-start', paddingTop:32}}>
-      <div style={{width:'100%', maxWidth:640}}>
-        <div style={{background:'var(--hardwood)', border:'1px solid var(--kelly)', padding:'20px 28px', marginBottom:16, display:'flex', alignItems:'center', justifyContent:'space-between'}}>
-          <div style={{fontFamily:'Bebas Neue,sans-serif', fontSize:28, letterSpacing:3, color:'var(--kelly)'}}>THE KELLY GAME · RULES</div>
-          <button className="btn btn-ghost btn-sm" onClick={()=>setMode("login")}>← BACK TO LOGIN</button>
-        </div>
-        <div style={{background:'rgba(77,189,92,0.06)', border:'1px solid rgba(77,189,92,0.2)', padding:20, marginBottom:16, fontFamily:'DM Mono,monospace', fontSize:12, color:'var(--chalk-dim)', lineHeight:1.9}}>
-          <div style={{fontFamily:'Bebas Neue,sans-serif', fontSize:18, letterSpacing:2, color:'var(--kelly)', marginBottom:12}}>THE SHORT VERSION</div>
-          {[
-            "1. Every player starts with the same number of points — your bankroll for the game.",
-            "2. Each round, pick teams against the point spread and wager your points.",
-            "3. Win a pick → earn points equal to your wager. Lose → lose them.",
-            "4. Your winnings carry forward — your point total becomes your starting balance next round.",
-            "5. You must wager at least 50% of your points each round or forfeit the remainder.",
-            "6. The player with the most points after the Championship wins. 🏆",
-          ].map((r,i) => <div key={i} style={{marginBottom:4}}>{r}</div>)}
-        </div>
-        {[
-          ["PICKING AGAINST THE SPREAD", "Every game has a point spread. The favorite must win by more than the spread to cover. The underdog just needs to keep it close or win outright. Example: if Duke is -8.5, they must win by 9+. If you pick Vermont +8.5, Vermont just needs to lose by 8 or fewer."],
-          ["THE 50% RULE", "You MUST wager at least 50% of your starting points each round across your picks. If you start with 500 pts, you must wager at least 250. Fail to meet the minimum and your unwagered balance is forfeited for that round."],
-          ["PICKS LOCK AT TIP-OFF", "Once a game tips off, picks for that game close — no changes allowed. Make sure you get your picks in early. The commissioner may also lock the round manually before the first tip."],
-          ["WIN / LOSE / PUSH", "Win your pick → +wager pts. Lose → -wager pts. If the game lands exactly on the spread (a push) → wager returned, no gain or loss."],
-          ["QUESTIONS?", "Use the ✉ MSG COMMISSIONER button after logging in to reach the commissioner directly. They have final say on all disputes and scoring corrections."],
-        ].map(([title, body]) => (
-          <div key={title} style={{background:'var(--hardwood)', border:'1px solid var(--line)', marginBottom:8, padding:'14px 20px'}}>
-            <div style={{fontFamily:'Bebas Neue,sans-serif', fontSize:16, letterSpacing:2, color:'var(--chalk)', marginBottom:6}}>{title}</div>
-            <div style={{fontFamily:'DM Mono,monospace', fontSize:11, color:'var(--chalk-dim)', lineHeight:1.8}}>{body}</div>
-          </div>
-        ))}
-        <button className="btn btn-kelly btn-full" style={{marginTop:8}} onClick={()=>setMode("login")}>← BACK TO LOGIN</button>
-      </div>
-    </div>
-  );
-
   return (
-    <div className="auth-wrap"><div className="auth-card">
-      <div className="auth-title">THE KELLY GAME</div><div className="auth-sub">NCAA TOURNAMENT · SPREAD GAME</div>
-      {error && <div className="error-msg">{error}</div>}
-      {mode==="register" && <div className="field"><label>YOUR NAME</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. John Smith" onKeyDown={e=>e.key==='Enter'&&submit()} /></div>}
-      <div className="field"><label>EMAIL</label><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@email.com" onKeyDown={e=>e.key==='Enter'&&submit()} /></div>
-      <div className="field"><label>PASSWORD</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==='Enter'&&submit()} /></div>
-      <button className="btn btn-kelly btn-full" onClick={submit} disabled={busy}>{busy?"...":mode==="login"?"SIGN IN":"JOIN THE GAME"}</button>
-      {mode==="login" && <div style={{textAlign:'center',marginTop:10}}><button style={{background:'none',border:'none',color:'var(--chalk-dim)',cursor:'pointer',fontFamily:'DM Mono,monospace',fontSize:11,textDecoration:'underline'}} onClick={()=>{ setMode("forgot"); setError(""); }}>Forgot password?</button></div>}
-      <div className="auth-switch">
-        {mode==="login"
-          ? !registrationLocked && <>New player? <button onClick={()=>setMode("register")}>Create account</button></>
-          : <>Already playing? <button onClick={()=>setMode("login")}>Sign in</button></>}
-        {mode==="login" && registrationLocked && <span style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)'}}>Registration is currently closed.</span>}
-      </div>
-      {/* Rules link */}
-      <div style={{textAlign:'center', marginTop:20, paddingTop:16, borderTop:'1px solid var(--line)'}}>
-        <button onClick={()=>setMode("rules")} style={{background:'none', border:'none', color:'var(--kelly)', cursor:'pointer', fontFamily:'DM Mono,monospace', fontSize:11, letterSpacing:1, textDecoration:'underline'}}>
-          📋 READ THE RULES BEFORE SIGNING UP
-        </button>
-      </div>
-    </div></div>
+    <>
+      {showRulesModal && <RulesModal />}
+      <div className="auth-wrap"><div className="auth-card">
+        <div className="auth-title">THE KELLY GAME</div><div className="auth-sub">PICK · WAGER · WIN</div>
+        {error && <div className="error-msg">{error}</div>}
+        {mode==="register" && <div className="field"><label>YOUR NAME</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. John Smith" onKeyDown={e=>e.key==='Enter'&&submit()} /></div>}
+        <div className="field"><label>EMAIL</label><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@email.com" onKeyDown={e=>e.key==='Enter'&&submit()} /></div>
+        <div className="field"><label>PASSWORD</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==='Enter'&&submit()} /></div>
+        <button className="btn btn-kelly btn-full" onClick={submit} disabled={busy}>{busy?"...":mode==="login"?"SIGN IN":"JOIN THE GAME"}</button>
+        {mode==="login" && <div style={{textAlign:'center',marginTop:10}}><button style={{background:'none',border:'none',color:'var(--chalk-dim)',cursor:'pointer',fontFamily:'DM Mono,monospace',fontSize:11,textDecoration:'underline'}} onClick={()=>{ setMode("forgot"); setError(""); }}>Forgot password?</button></div>}
+        <div className="auth-switch">
+          {mode==="login"
+            ? !registrationLocked && <>New player? <button onClick={()=>setMode("register")}>Create account</button></>
+            : <>Already playing? <button onClick={()=>setMode("login")}>Sign in</button></>}
+          {mode==="login" && registrationLocked && <span style={{fontFamily:'DM Mono,monospace',fontSize:11,color:'var(--chalk-dim)'}}>Registration is currently closed.</span>}
+        </div>
+        {/* Rules link */}
+        <div style={{textAlign:'center', marginTop:20, paddingTop:16, borderTop:'1px solid var(--line)'}}>
+          <button onClick={()=>{ setShowRulesModal(true); setRulesTab(golfMode?'golf':'ncaa'); }} style={{background:'none', border:'none', color:'var(--kelly)', cursor:'pointer', fontFamily:'DM Mono,monospace', fontSize:11, letterSpacing:1, textDecoration:'underline'}}>
+            📋 READ THE RULES BEFORE SIGNING UP
+          </button>
+        </div>
+      </div></div>
+    </>
   );
 }
 
