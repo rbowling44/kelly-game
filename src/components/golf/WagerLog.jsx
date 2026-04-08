@@ -80,11 +80,12 @@ export default function WagerLog({ tournamentId, isAdmin = false, user = null })
         {!isAdmin && (
           <div style={{ display: 'flex', gap: 4 }}>
             {[{ v: 'mine', l: 'MY WAGERS' }, { v: 'all', l: 'ALL PLAYERS' }].map(({ v, l }) => (
-              <button key={v} onClick={() => setViewScope(v)} style={{ ...MONO, fontSize: 11, letterSpacing: 1, padding: '6px 12px', cursor: 'pointer', border: viewScope === v ? '1px solid var(--kelly)' : '1px solid var(--line)', background: viewScope === v ? 'rgba(77,189,92,0.15)' : 'rgba(255,255,255,0.03)', color: viewScope === v ? 'var(--kelly)' : 'var(--chalk-dim)' }}>{l}</button>
+              <button key={v} onClick={() => { setViewScope(v); if (v === 'mine') setFilterPlayer(''); }} style={{ ...MONO, fontSize: 11, letterSpacing: 1, padding: '6px 12px', cursor: 'pointer', border: viewScope === v ? '1px solid var(--kelly)' : '1px solid var(--line)', background: viewScope === v ? 'rgba(77,189,92,0.15)' : 'rgba(255,255,255,0.03)', color: viewScope === v ? 'var(--kelly)' : 'var(--chalk-dim)' }}>{l}</button>
             ))}
           </div>
         )}
-        {isAdmin && (
+        {/* Player filter — shown for admin always, and for players when viewing all wagers */}
+        {(isAdmin || (!isAdmin && viewScope === 'all')) && (
           <select value={filterPlayer} onChange={e => setFilterPlayer(e.target.value)} style={SEL}>
             <option value="">All Players</option>
             {players.map(p => <option key={p} value={p}>{p}</option>)}

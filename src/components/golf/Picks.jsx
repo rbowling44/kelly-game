@@ -26,6 +26,9 @@ function calcToWin(pts, oddsStr) {
 const MONO = { fontFamily: "'DM Mono', monospace" };
 const TH = { ...MONO, fontSize: 11, letterSpacing: 1, color: 'var(--kelly)', padding: '10px 12px', textAlign: 'left', background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid var(--line)' };
 const TD = { ...MONO, fontSize: 12, color: 'var(--chalk)', padding: '10px 12px', borderBottom: '1px solid rgba(77,189,92,0.08)' };
+const SEL = { background: '#fff', border: '1px solid var(--line)', color: '#111', padding: '6px 10px', ...MONO, fontSize: 12, outline: 'none' };
+
+const ROUND_DAYS = { 1: 'THURS/FRI', 2: 'SAT', 3: 'SUN' };
 
 export default function Picks({ tournamentId, user, onWagerPlaced }) {
   const [golfers, setGolfers]             = useState([]);
@@ -37,7 +40,10 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
   const [flash, setFlash]                 = useState(null);
   const [loading, setLoading]             = useState(false);
   const [wagerWindowOpen, setWagerWindowOpen] = useState(true);
-  const [lockedWagers, setLockedWagers]   = useState([]);
+  const [lockedWagers, setLockedWagers]       = useState([]);
+  const [lockFilterPlayer, setLockFilterPlayer]     = useState('');
+  const [lockFilterGolfer, setLockFilterGolfer]     = useState('');
+  const [lockFilterCategory, setLockFilterCategory] = useState('');
 
   useEffect(() => { if (tournamentId) init(); }, [tournamentId]);
   useEffect(() => { if (tournamentId) loadRound(round); }, [round]);
@@ -145,35 +151,67 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
         </div>
 
         {/* Pending wagers transparency table */}
-        {lockedWagers.length > 0 && (
-          <div>
-            <div style={{ ...MONO, fontSize: 11, letterSpacing: 2, color: 'var(--chalk-dim)', marginBottom: 12 }}>PENDING WAGERS — ROUND {round}</div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    <th style={TH}>PLAYER</th>
-                    <th style={TH}>GOLFER</th>
-                    <th style={TH}>CATEGORY</th>
-                    <th style={{ ...TH, textAlign: 'right' }}>WAGERED</th>
-                    <th style={{ ...TH, textAlign: 'right' }}>TO WIN</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lockedWagers.map(w => (
-                    <tr key={w.id}>
-                      <td style={TD}>{w.player_name || w.user_email}</td>
-                      <td style={TD}>{w.golf_golfers?.name || '—'}</td>
-                      <td style={{ ...TD, textTransform: 'uppercase', letterSpacing: 1 }}>{w.category}</td>
-                      <td style={{ ...TD, textAlign: 'right', color: 'var(--gold)' }}>{w.points_wagered}</td>
-                      <td style={{ ...TD, textAlign: 'right', color: 'var(--chalk-dim)' }}>{calcToWin(w.points_wagered, w.odds_at_time) ?? '—'}</td>
+        {lockedWagers.length > 0 && (() => {
+          const lockPlayers    = [...new Set(lockedWagers.map(w => w.player_name || w.user_email))].sort();
+          const lockGolfers    = [...new Set(lockedWagers.map(w => w.golf_golfers?.name).filter(Boolean))].sort();
+          const lockCategories = [...new Set(lockedWagers.map(w => w.category).filter(Boolean))].sort();
+          const filteredLocked = lockedWagers.filter(w => {
+            if (lockFilterPlayer && (w.player_name || w.user_email) !== lockFilterPlayer) return false;
+            if (lockFilterGolfer && w.golf_golfers?.name !== lockFilterGolfer) return false;
+            if (lockFilterCategory && w.category !== lockFilterCategory) return false;
+            return true;
+          });
+          return (
+            <div>
+              <div style={{ ...MONO, fontSize: 11, letterSpacing: 2, color: 'var(--chalk-dim)', marginBottom: 12 }}>
+                PENDING WAGERS — ROUND {round} ({ROUND_DAYS[round]})
+              </div>
+              {/* Filters */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                <select value={lockFilterPlayer} onChange={e => setLockFilterPlayer(e.target.value)} style={SEL}>
+                  <option value="">All Players</option>
+                  {lockPlayers.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <select value={lockFilterGolfer} onChange={e => setLockFilterGolfer(e.target.value)} style={SEL}>
+                  <option value="">All Golfers</option>
+                  {lockGolfers.map(g => <option key={g} value={g}>{g}</option>)}
+                </select>
+                <select value={lockFilterCategory} onChange={e => setLockFilterCategory(e.target.value)} style={SEL}>
+                  <option value="">All Categories</option>
+                  {lockCategories.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+                </select>
+                <span style={{ ...MONO, fontSize: 11, color: 'var(--chalk-dim)' }}>{filteredLocked.length} wager{filteredLocked.length !== 1 ? 's' : ''}</span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={TH}>PLAYER</th>
+                      <th style={TH}>GOLFER</th>
+                      <th style={TH}>CATEGORY</th>
+                      <th style={{ ...TH, textAlign: 'right' }}>WAGERED</th>
+                      <th style={{ ...TH, textAlign: 'right' }}>TO WIN</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {filteredLocked.map(w => (
+                      <tr key={w.id}>
+                        <td style={TD}>{w.player_name || w.user_email}</td>
+                        <td style={TD}>{w.golf_golfers?.name || '—'}</td>
+                        <td style={{ ...TD, textTransform: 'uppercase', letterSpacing: 1 }}>{w.category}</td>
+                        <td style={{ ...TD, textAlign: 'right', color: 'var(--gold)' }}>{w.points_wagered}</td>
+                        <td style={{ ...TD, textAlign: 'right', color: 'var(--chalk-dim)' }}>{calcToWin(w.points_wagered, w.odds_at_time) ?? '—'}</td>
+                      </tr>
+                    ))}
+                    {filteredLocked.length === 0 && (
+                      <tr><td colSpan={5} style={{ ...TD, textAlign: 'center', color: 'var(--chalk-dim)', padding: '24px' }}>No wagers match the selected filters.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
         {lockedWagers.length === 0 && (
           <div className="empty-state">No wagers placed for this round yet.</div>
         )}
@@ -186,7 +224,9 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
       {/* Banner */}
       <div className="round-banner" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <div>
-          <div className="round-name" style={{ marginBottom: 4 }}>KELLY ROUND {round}</div>
+          <div className="round-name" style={{ marginBottom: 4 }}>
+            KELLY ROUND {round}{ROUND_DAYS[round] ? ` (${ROUND_DAYS[round]})` : ''}
+          </div>
           {bankroll && (
             <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: 'var(--chalk-dim)' }}>
               BANKROLL:{' '}
@@ -198,6 +238,17 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
         <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--chalk-dim)', letterSpacing: 1 }}>
           ACTIVE ROUND
         </div>
+      </div>
+
+      {/* Reminder box */}
+      <div style={{ background: 'rgba(77,189,92,0.04)', border: '1px solid rgba(77,189,92,0.12)', padding: '12px 18px', marginBottom: 16 }}>
+        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 1, color: 'var(--kelly)', marginBottom: 8 }}>REMINDER</div>
+        <ul style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--chalk-dim)', lineHeight: 1.9, paddingLeft: 16, margin: 0 }}>
+          <li>All picks are final after selecting Place Bet</li>
+          <li>All picks must be made before first tee time of the day</li>
+          <li>Leader, Top 5, and Top 10 refer to how the golfer finished that Kelly Round</li>
+          <li>Kelly Round 1 is cumulative Thurs/Fri &nbsp;|&nbsp; Round 2 is Saturday &nbsp;|&nbsp; Round 3 is Sunday</li>
+        </ul>
       </div>
 
       {/* Flash message */}
