@@ -213,7 +213,7 @@ function formatCT(ts) {
 
 // ── Supabase helpers ──────────────────────────────────────────
 const DB = {
-  async getSetting(key)       { const {data} = await supabase.from('settings').select('value').eq('key',key).single(); return data?.value ?? null; },
+  async getSetting(key)       { const {data} = await supabase.from('settings').select('value').eq('key',key).maybeSingle(); return data?.value ?? null; },
   async setSetting(key,value) { await supabase.from('settings').upsert({key,value}); },
   async currentRound()        { return parseInt(await DB.getSetting('current_round'))  || 1; },
   async startingPoints()      { return parseInt(await DB.getSetting('starting_points')) || 100; },
@@ -242,7 +242,7 @@ const DB = {
   async clearNotifications()     { await supabase.from('notifications').delete().neq('id',0); },
   async resetAllGameData()       {
     // Read current starting points first
-    const spData = await supabase.from('settings').select('value').eq('key','starting_points').single();
+    const spData = await supabase.from('settings').select('value').eq('key','starting_points').maybeSingle();
     const sp = parseInt(spData.data?.value) || 100;
     // Wipe picks, games, notifications
     await supabase.from('picks').delete().neq('id', 0);
@@ -438,7 +438,7 @@ function AppInner() {
         {tab==='rules'         && !liveUser.is_admin && (mode==='golf' ? <RulesGolf /> : <RulesView         user={liveUser} appData={appData} />)}
         {tab==='admin'         &&  liveUser.is_admin && <AdminView         appData={appData} onRefresh={loadAppData} />}
         {tab==='tracker'       &&  liveUser.is_admin && (mode==='golf' ? <GolfRoundTracker tournamentId={golfTournamentId} /> : <RoundTrackerView  appData={appData} />)}
-        {tab==='wagers'        &&  liveUser.is_admin && (mode==='golf' ? <WagerLogGolf tournamentId={golfTournamentId} /> : <WagerLogView />)}
+        {tab==='wagers'        &&  liveUser.is_admin && (mode==='golf' ? <WagerLogGolf tournamentId={golfTournamentId} isAdmin={true} /> : <WagerLogView />)}
         {tab==='notifications' &&  liveUser.is_admin && <NotificationsView onRefresh={refreshUnread} />}
       </main>
     </div>

@@ -21,6 +21,75 @@ async function settleRound({ tournament_id, kelly_round }) {
   return data;
 }
 
+// Client-side settle: marks wagers won/lost based on results map { golfer_id: ['leader','top5'] }
+// results = { leader: golfer_id|null, top5: [golfer_id,...], top10: [golfer_id,...] }
+async function settleRoundClient({ tournament_id, kelly_round, results }) {
+  // results shape: { leader: number|null, top5: number[], top10: number[] }
+  // Fetch all pending wagers for this round
+  const { data: wagers, error } = await supabase
+    .from('golf_wagers')
+    .select('id, user_email, golfer_id, category, points_wagered, odds_at_time')
+    .eq('tournament_id', tournament_id)
+    .eq('kelly_round', kelly_round)
+    .eq('result', 'pending');
+  if (error) throw error;
+
+  const updates = [];
+  for (const w of wagers || []) {
+    let won = false;
+    if (w.category === 'leader' && results.leader && w.golfer_id === results.leader) won = true;
+    if (w.category === 'top5'   && results.top5?.includes(w.golfer_id))  won = true;
+    if (w.category === 'top10'  && results.top10?.includes(w.golfer_id)) won = true;
+
+    const result = won ? 'won' : 'lost';
+    let points_won = 0;
+    if (won) {
+      const o = Number(w.odds_at_time);
+      if (!isNaN(o) && o !== 0) {
+        points_won = o > 0
+          ? Math.round(w.points_wagered * o / 100)
+          : Math.round(w.points_wagered * 100 / Math.abs(o));
+      }
+    } else {
+      points_won = -w.points_wagered;
+    }
+    updates.push({ id: w.id, user_email: w.user_email, result, points_won });
+  }
+
+  // Apply updates
+  for (const u of updates) {
+    await supabase.from('golf_wagers').update({ result: u.result, points_won: u.points_won }).eq('id', u.id);
+  }
+
+  // Update bankrolls: add winnings back (points_remaining += points_won for winners, losses already deducted by place_wager)
+  // Rebuild points_remaining = starting_points - total_wagered + total_won
+  const { data: bankrolls } = await supabase.from('golf_bankrolls').select('user_email, starting_points').eq('tournament_id', tournament_id).eq('kelly_round', kelly_round);
+  const { data: allWagers } = await supabase.from('golf_wagers').select('user_email, points_wagered, points_won, result').eq('tournament_id', tournament_id).eq('kelly_round', kelly_round);
+
+  for (const b of bankrolls || []) {
+    const userWagers = (allWagers || []).filter(w => w.user_email === b.user_email);
+    const totalWagered = userWagers.reduce((s, w) => s + (w.points_wagered || 0), 0);
+    const totalWon = userWagers.filter(w => w.result === 'won').reduce((s, w) => s + (w.points_won || 0), 0);
+    const points_remaining = b.starting_points - totalWagered + totalWon;
+    await supabase.from('golf_bankrolls').update({ points_remaining }).eq('tournament_id', tournament_id).eq('kelly_round', kelly_round).eq('user_email', b.user_email);
+  }
+
+  // Seed next round bankrolls if kelly_round < 3
+  if (kelly_round < 3) {
+    const nextRound = kelly_round + 1;
+    const { data: existing } = await supabase.from('golf_bankrolls').select('user_email').eq('tournament_id', tournament_id).eq('kelly_round', nextRound);
+    const existingSet = new Set((existing || []).map(x => x.user_email));
+    const { data: currentBankrolls } = await supabase.from('golf_bankrolls').select('user_email, points_remaining').eq('tournament_id', tournament_id).eq('kelly_round', kelly_round);
+    for (const b of currentBankrolls || []) {
+      if (existingSet.has(b.user_email)) continue;
+      const sp = Math.max(0, b.points_remaining);
+      await supabase.from('golf_bankrolls').insert({ tournament_id, kelly_round: nextRound, user_email: b.user_email, starting_points: sp, points_remaining: sp });
+    }
+  }
+
+  return updates.length;
+}
+
 async function upsertGolfers(golfers) {
   const { data, error } = await supabase.from('golf_golfers').upsert(golfers, { onConflict: 'datagolf_id,tournament_id' });
   if (error) throw error;
