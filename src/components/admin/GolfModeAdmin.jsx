@@ -106,13 +106,23 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
 
   const handleDeletePlayer = async (email) => {
     const p = players.find(x => x.email === email);
-    if (!window.confirm(`Remove ${p?.name} from this golf tournament?\n\nThis deletes their bankroll and wagers for this tournament only. Their account is kept.`)) return;
-    await Promise.all([
-      supabase.from('golf_bankrolls').delete().eq('user_email', email).eq('tournament_id', tournamentId),
-      supabase.from('golf_wagers').delete().eq('user_email', email).eq('tournament_id', tournamentId),
-    ]);
-    setPlayers(prev => prev.filter(x => x.email !== email));
-    flashSuccess(`${p?.name} removed from tournament.`);
+    if (!window.confirm(`Are you sure you want to remove ${p?.name} from this golf tournament?\n\nThis will delete their wagers and bankroll but keep their account for the NCAA game.`)) return;
+    setLoading(true);
+    setError('');
+    try {
+      const [wagersRes, bankrollsRes] = await Promise.all([
+        supabase.from('golf_wagers').delete().eq('user_email', email).eq('tournament_id', tournamentId),
+        supabase.from('golf_bankrolls').delete().eq('user_email', email).eq('tournament_id', tournamentId),
+      ]);
+      if (wagersRes.error) throw wagersRes.error;
+      if (bankrollsRes.error) throw bankrollsRes.error;
+      await loadData();
+      flashSuccess(`${p?.name} removed from tournament.`);
+    } catch (e) {
+      setError('Remove failed: ' + e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const saveWagerWindow = async (val) => {
@@ -652,6 +662,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
               {/* Delete from tournament */}
               <button
                 onClick={() => handleDeletePlayer(p.email)}
+                disabled={loading}
                 style={{ ...STYLES.btn, ...STYLES.btnGhost, ...STYLES.btnSm, marginBottom: 0, marginLeft: 'auto', color: 'var(--red)', borderColor: 'rgba(231,76,60,0.3)', fontSize: 11 }}
               >✕ REMOVE</button>
             </div>
