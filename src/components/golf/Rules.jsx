@@ -293,17 +293,6 @@ export default function GolfRules() {
         </div>
       </Section>
 
-      {/* Cut rule */}
-      <Section icon="✂️" title="THE CUT RULE">
-        The Masters cuts the field after Friday's round. Any golfer who misses the cut does not play the weekend.
-        <div style={S.warnBox}>
-          ⚠️ If you placed a Round 1 bet on a golfer who misses the cut,
-          that bet is an automatic loss — regardless of how they played Thursday.
-          For Round 2 and Round 3, only golfers who made the cut are eligible to bet on.
-        </div>
-        Always check the leaderboard before placing weekend bets.
-      </Section>
-
       {/* How to win */}
       <Section icon="🏆" title="HOW TO WIN OVERALL">
         The overall winner is the player with the most <strong style={{ color: 'var(--gold)' }}>total points accumulated</strong> across all three Kelly Rounds.
