@@ -144,26 +144,35 @@ async function getOddsForGolfer(golfer_id, kelly_round) {
 }
 
 async function getPlayerBankrollsForRound(tournament_id, kelly_round) {
-  const { data: users, error: usersErr } = await supabase.from('users').select('email, name, paid');
-  if (usersErr) throw usersErr;
-  const { data: bankrolls, error: bErr } = await supabase.from('golf_bankrolls').select('*').eq('tournament_id', tournament_id).eq('kelly_round', kelly_round);
+  // Query bankrolls first — only players with actual records for this round appear
+  const { data: bankrolls, error: bErr } = await supabase.from('golf_bankrolls').select('user_email, starting_points, points_remaining').eq('tournament_id', tournament_id).eq('kelly_round', kelly_round);
   if (bErr) throw bErr;
-  const { data: wagers, error: wErr } = await supabase.from('golf_wagers').select('user_id').eq('tournament_id', tournament_id).eq('kelly_round', kelly_round);
-  if (wErr) throw wErr;
-  // count wagers per user
+  if (!bankrolls || bankrolls.length === 0) return [];
+
+  const emails = bankrolls.map(b => b.user_email);
+
+  const [usersRes, wagersRes] = await Promise.all([
+    supabase.from('users').select('email, name, paid').in('email', emails),
+    supabase.from('golf_wagers').select('user_id').eq('tournament_id', tournament_id).eq('kelly_round', kelly_round),
+  ]);
+  if (usersRes.error) throw usersRes.error;
+
+  const userMap = {};
+  (usersRes.data || []).forEach(u => { userMap[u.email] = u; });
+
   const wagerCounts = {};
-  (wagers || []).forEach(w => { wagerCounts[w.user_id] = (wagerCounts[w.user_id] || 0) + 1; });
-  // merge
-  return (users || []).map(u => {
-    const bankroll = (bankrolls || []).find(b => b.user_email === u.email);
+  (wagersRes.data || []).forEach(w => { wagerCounts[w.user_id] = (wagerCounts[w.user_id] || 0) + 1; });
+
+  return bankrolls.map(b => {
+    const u = userMap[b.user_email] || {};
     return {
-      user_id: u.email,
-      email: u.email,
-      name: u.name,
+      user_id: b.user_email,
+      email: b.user_email,
+      name: u.name || 'Unknown',
       paid: u.paid || false,
-      starting_points: bankroll?.starting_points || 0,
-      points_remaining: bankroll?.points_remaining || 0,
-      wager_count: wagerCounts[u.email] || 0
+      starting_points: b.starting_points,
+      points_remaining: b.points_remaining,
+      wager_count: wagerCounts[b.user_email] || 0,
     };
   });
 }

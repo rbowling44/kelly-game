@@ -276,6 +276,7 @@ function AppInner() {
   const [unread, setUnread]     = useState(0);
   const [liveWagered, setLiveWagered] = useState(0);
   const [golfTournamentId, setGolfTournamentId] = useState(null);
+  const [golfBankrollPts, setGolfBankrollPts] = useState(null);
   const { mode, setMode } = useGolfMode();
 
   useEffect(() => {
@@ -360,6 +361,21 @@ function AppInner() {
     window.history.pushState({}, '', path);
   };
 
+  useEffect(() => {
+    if (mode !== 'golf' || !user || user.is_admin || !golfTournamentId) { setGolfBankrollPts(null); return; }
+    (async () => {
+      const { data: roundSetting } = await supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle();
+      const kellyRound = parseInt(roundSetting?.value || '1');
+      const { data } = await supabase.from('golf_bankrolls')
+        .select('points_remaining')
+        .eq('user_email', user.email)
+        .eq('tournament_id', golfTournamentId)
+        .eq('kelly_round', kellyRound)
+        .maybeSingle();
+      setGolfBankrollPts(data?.points_remaining ?? 0);
+    })();
+  }, [mode, user, golfTournamentId]);
+
   useEffect(() => { if (user?.is_admin) refreshUnread(); }, [user]);
 
   const login = (u) => {
@@ -376,7 +392,8 @@ function AppInner() {
   const savedSession = sessionStorage.getItem('kelly_session');
   const liveUser = savedSession ? JSON.parse(savedSession) : user;
   const startPts = liveUser.rounds?.[appData.currentRound] ?? 0;
-  const pts = Math.max(0, startPts - liveWagered);
+  const ncaaPts = Math.max(0, startPts - liveWagered);
+  const pts = (mode === 'golf' && golfBankrollPts !== null) ? golfBankrollPts : ncaaPts;
 
   return (
     <div className="app">
