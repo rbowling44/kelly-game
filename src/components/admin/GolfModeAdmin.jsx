@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer, getPlayerBankrollsForRound } from '../../lib/supabaseGolf.js';
+import { addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer } from '../../lib/supabaseGolf.js';
 import { supabase } from '../../lib/supabaseClient.js';
 
 export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
@@ -130,13 +130,38 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
     try {
       setLoading(true);
       setError('');
-      const [g, p] = await Promise.all([
+
+      // Read active golf kelly round from settings — do not use selectedRound (which is the NCAA round)
+      const { data: arSetting } = await supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle();
+      const bankrollRound = parseInt(arSetting?.value || '1');
+
+      const [g, usersRes, bankrollsRes] = await Promise.all([
         getGolfers(tournamentId),
-        getPlayerBankrollsForRound(tournamentId, selectedRound)
+        supabase.from('users').select('email, name, paid').eq('is_admin', false),
+        supabase.from('golf_bankrolls')
+          .select('user_email, starting_points, points_remaining')
+          .eq('tournament_id', tournamentId)
+          .eq('kelly_round', bankrollRound),
       ]);
+
+      if (usersRes.error) throw usersRes.error;
+      if (bankrollsRes.error) throw bankrollsRes.error;
+
       setGolfers(g);
-      setPlayers(p);
-      // Load odds for all golfers
+
+      const bankrollMap = {};
+      (bankrollsRes.data || []).forEach(b => { bankrollMap[b.user_email] = b; });
+
+      setPlayers((usersRes.data || []).map(u => ({
+        user_id: u.email,
+        email: u.email,
+        name: u.name || 'Unknown',
+        paid: u.paid || false,
+        starting_points: bankrollMap[u.email]?.starting_points ?? 0,
+        points_remaining: bankrollMap[u.email]?.points_remaining ?? 0,
+      })));
+
+      // Load odds for the selected round (odds editor uses selectedRound independently)
       const odds = {};
       for (const golfer of g) {
         const o = await getOddsForGolfer(golfer.id, selectedRound);
