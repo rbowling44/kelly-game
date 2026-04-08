@@ -29,7 +29,7 @@ export default function Picks({ tournamentId, user }) {
   useEffect(() => { if (tournamentId) loadRound(round); }, [round]);
 
   async function init() {
-    const { data: setting } = await supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').single();
+    const { data: setting } = await supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle();
     const activeRound = parseInt(setting?.value || '1');
     setRound(activeRound);
   }
@@ -37,16 +37,20 @@ export default function Picks({ tournamentId, user }) {
   async function loadRound(r) {
     setLoading(true);
     try {
-      const [g, b] = await Promise.all([
-        getGolfersWithOdds(tournamentId, r),
-        ensureBankroll(tournamentId, r, user.email),
-      ]);
+      const g = await getGolfersWithOdds(tournamentId, r);
       setGolfers(g);
-      setBankroll(b);
     } catch (e) {
-      showFlash('Error loading: ' + e.message, 'error');
+      showFlash('Error loading golfers: ' + e.message, 'error');
     } finally {
       setLoading(false);
+    }
+    // Bankroll is loaded separately so a failure here never blocks the golfer list
+    try {
+      const b = await ensureBankroll(tournamentId, r, user.email);
+      setBankroll(b);
+    } catch (e) {
+      // Non-fatal — bankroll display just won't show
+      console.warn('Bankroll load failed:', e.message);
     }
   }
 

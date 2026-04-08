@@ -174,10 +174,10 @@ async function ensureBankroll(tournament_id, kelly_round, user_id) {
     .eq('tournament_id', tournament_id)
     .eq('kelly_round', kelly_round)
     .eq('user_id', user_id)
-    .single();
+    .maybeSingle();
   if (existing) return existing;
 
-  const { data: setting } = await supabase.from('settings').select('value').eq('key', 'golf_starting_points').single();
+  const { data: setting } = await supabase.from('settings').select('value').eq('key', 'golf_starting_points').maybeSingle();
   const startPts = parseInt(setting?.value || '500');
 
   const { data, error } = await supabase

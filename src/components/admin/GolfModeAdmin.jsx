@@ -31,9 +31,9 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
 
   const loadSettings = async () => {
     const [sp, ww, ar] = await Promise.all([
-      supabase.from('settings').select('value').eq('key', 'golf_starting_points').single(),
-      supabase.from('settings').select('value').eq('key', 'golf_wager_window_open').single(),
-      supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').single(),
+      supabase.from('settings').select('value').eq('key', 'golf_starting_points').maybeSingle(),
+      supabase.from('settings').select('value').eq('key', 'golf_wager_window_open').maybeSingle(),
+      supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle(),
     ]);
     if (sp.data?.value) setGolfStartingPoints(sp.data.value);
     if (ww.data?.value) setWagerWindowOpen(ww.data.value);
