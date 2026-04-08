@@ -9,7 +9,7 @@ const S = {
   section: { background: 'var(--hardwood)', border: '1px solid var(--line)', padding: 20, marginBottom: 20 },
   title: { ...BEBAS, fontSize: 22, letterSpacing: 2, color: 'var(--kelly)', marginBottom: 16 },
   label: { ...MONO, fontSize: 10, letterSpacing: 1, color: 'var(--chalk-dim)', display: 'block', marginBottom: 6 },
-  select: { ...MONO, fontSize: 13, background: 'rgba(255,255,255,0.05)', border: '1px solid var(--line)', color: 'var(--chalk)', padding: '8px 12px', outline: 'none', width: '100%' },
+  select: { ...MONO, fontSize: 13, background: '#fff', border: '1px solid var(--line)', color: '#111', padding: '8px 12px', outline: 'none', width: '100%' },
   row: { marginBottom: 16 },
   checkGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 6, marginTop: 6 },
   checkItem: (checked) => ({

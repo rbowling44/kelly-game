@@ -17,7 +17,7 @@ function resultColor(r) {
 const MONO = { fontFamily: "'DM Mono', monospace" };
 const TH = { ...MONO, fontSize: 11, letterSpacing: 1, color: 'var(--kelly)', padding: '10px 12px', textAlign: 'left', background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid var(--line)' };
 const TD = { ...MONO, fontSize: 12, color: 'var(--chalk)', padding: '10px 12px', borderBottom: '1px solid rgba(77,189,92,0.08)' };
-const SEL = { background: 'rgba(255,255,255,0.05)', border: '1px solid var(--line)', color: 'var(--chalk)', padding: '6px 10px', ...MONO, fontSize: 12, outline: 'none' };
+const SEL = { background: '#fff', border: '1px solid var(--line)', color: '#111', padding: '6px 10px', ...MONO, fontSize: 12, outline: 'none' };
 
 // isAdmin: true = admin full log, false = player view (no pending)
 export default function WagerLog({ tournamentId, isAdmin = false }) {
