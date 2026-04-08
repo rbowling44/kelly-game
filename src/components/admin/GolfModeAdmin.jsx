@@ -149,9 +149,9 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
     try {
       setLoading(true);
       await Promise.all([
-        odds.leader ? saveGolferOdds(golferId, selectedRound, 'leader', odds.leader) : null,
-        odds.top5 ? saveGolferOdds(golferId, selectedRound, 'top5', odds.top5) : null,
-        odds.top10 ? saveGolferOdds(golferId, selectedRound, 'top10', odds.top10) : null,
+        odds.leader ? saveGolferOdds(tournamentId, golferId, selectedRound, 'leader', odds.leader) : null,
+        odds.top5 ? saveGolferOdds(tournamentId, golferId, selectedRound, 'top5', odds.top5) : null,
+        odds.top10 ? saveGolferOdds(tournamentId, golferId, selectedRound, 'top10', odds.top10) : null,
       ].filter(p => p));
       setError('');
     } catch (e) {
@@ -167,9 +167,9 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
       for (const golferId of Object.keys(oddsData)) {
         const odds = oddsData[golferId];
         await Promise.all([
-          odds.leader ? saveGolferOdds(golferId, selectedRound, 'leader', odds.leader) : null,
-          odds.top5 ? saveGolferOdds(golferId, selectedRound, 'top5', odds.top5) : null,
-          odds.top10 ? saveGolferOdds(golferId, selectedRound, 'top10', odds.top10) : null,
+          odds.leader ? saveGolferOdds(tournamentId, golferId, selectedRound, 'leader', odds.leader) : null,
+          odds.top5 ? saveGolferOdds(tournamentId, golferId, selectedRound, 'top5', odds.top5) : null,
+          odds.top10 ? saveGolferOdds(tournamentId, golferId, selectedRound, 'top10', odds.top10) : null,
         ].filter(p => p));
       }
       setError('');

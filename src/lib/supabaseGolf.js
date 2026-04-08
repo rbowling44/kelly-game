@@ -122,14 +122,15 @@ async function getGolfers(tournament_id) {
   return data || [];
 }
 
-async function saveGolferOdds(golfer_id, kelly_round, category, american_odds) {
+async function saveGolferOdds(tournament_id, golfer_id, kelly_round, category, american_odds) {
   const { data, error } = await supabase.from('golf_odds').upsert({
+    tournament_id,
     golfer_id,
     kelly_round,
     category,
     american_odds,
     set_by: 'admin'
-  }, { onConflict: 'golfer_id,kelly_round,category' });
+  }, { onConflict: 'tournament_id,golfer_id,kelly_round,category' });
   if (error) throw error;
   return data;
 }
