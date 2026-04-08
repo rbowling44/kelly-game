@@ -126,15 +126,9 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
             </div>
           )}
         </div>
-        <select
-          value={round}
-          onChange={e => setRound(Number(e.target.value))}
-          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--line)', color: 'var(--chalk)', padding: '6px 12px', fontFamily: "'DM Mono', monospace", fontSize: 13, outline: 'none' }}
-        >
-          <option value={1}>Kelly Round 1</option>
-          <option value={2}>Kelly Round 2</option>
-          <option value={3}>Kelly Round 3</option>
-        </select>
+        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--chalk-dim)', letterSpacing: 1 }}>
+          ACTIVE ROUND
+        </div>
       </div>
 
       {/* Flash message */}

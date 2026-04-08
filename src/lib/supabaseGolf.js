@@ -44,12 +44,14 @@ async function settleRoundClient({ tournament_id, kelly_round, results }) {
     const result = won ? 'won' : 'lost';
     let points_won = 0;
     if (won) {
+      // points_won = stake returned + profit
+      // e.g. 100pts at +500 → points_won = 100 + 500 = 600
+      // e.g. 200pts at -100 → points_won = 200 + 200 = 400
       const o = Number(w.odds_at_time);
-      if (!isNaN(o) && o !== 0) {
-        points_won = o > 0
-          ? Math.round(w.points_wagered * o / 100)
-          : Math.round(w.points_wagered * 100 / Math.abs(o));
-      }
+      const profit = (!isNaN(o) && o !== 0)
+        ? (o > 0 ? Math.round(w.points_wagered * o / 100) : Math.round(w.points_wagered * 100 / Math.abs(o)))
+        : 0;
+      points_won = w.points_wagered + profit;
     } else {
       points_won = -w.points_wagered;
     }
@@ -61,16 +63,17 @@ async function settleRoundClient({ tournament_id, kelly_round, results }) {
     await supabase.from('golf_wagers').update({ result: u.result, points_won: u.points_won }).eq('id', u.id);
   }
 
-  // Update bankrolls: add winnings back (points_remaining += points_won for winners, losses already deducted by place_wager)
-  // Rebuild points_remaining = starting_points - total_wagered + total_won
+  // Rebuild bankrolls using USE-IT-OR-LOSE-IT:
+  // points_remaining = only what was returned from WINNING wagers (stake + profit).
+  // Unspent points and losing stakes are forfeited — they do not carry forward.
   const { data: bankrolls } = await supabase.from('golf_bankrolls').select('user_email, starting_points').eq('tournament_id', tournament_id).eq('kelly_round', kelly_round);
   const { data: allWagers } = await supabase.from('golf_wagers').select('user_email, points_wagered, points_won, result').eq('tournament_id', tournament_id).eq('kelly_round', kelly_round);
 
   for (const b of bankrolls || []) {
     const userWagers = (allWagers || []).filter(w => w.user_email === b.user_email);
-    const totalWagered = userWagers.reduce((s, w) => s + (w.points_wagered || 0), 0);
+    // Only winning wagers contribute to the carry-forward balance
     const totalWon = userWagers.filter(w => w.result === 'won').reduce((s, w) => s + (w.points_won || 0), 0);
-    const points_remaining = b.starting_points - totalWagered + totalWon;
+    const points_remaining = totalWon; // unspent points are forfeited
     await supabase.from('golf_bankrolls').update({ points_remaining }).eq('tournament_id', tournament_id).eq('kelly_round', kelly_round).eq('user_email', b.user_email);
   }
 
@@ -160,20 +163,26 @@ async function syncLeaderboardToGolfers(tournament_id) {
 }
 
 async function getLeaderboard(tournament_id) {
-  // Use golf_bankrolls as the source of truth — sum points_remaining across rounds per player
+  // Only show the active kelly round's points_remaining — never sum across rounds
+  const { data: roundSetting } = await supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle();
+  const activeRound = parseInt(roundSetting?.value || '1');
+
   const { data: bankrolls, error: bErr } = await supabase
     .from('golf_bankrolls')
     .select('user_email, points_remaining')
-    .eq('tournament_id', tournament_id);
+    .eq('tournament_id', tournament_id)
+    .eq('kelly_round', activeRound);
   if (bErr) throw bErr;
 
   const { data: wagers, error: wErr } = await supabase
     .from('golf_wagers')
     .select('user_email')
-    .eq('tournament_id', tournament_id);
+    .eq('tournament_id', tournament_id)
+    .eq('kelly_round', activeRound);
   if (wErr) throw wErr;
 
   const emails = [...new Set((bankrolls || []).map(b => b.user_email))];
+  if (!emails.length) return [];
   const { data: users, error: uErr } = await supabase.from('users').select('email, name').in('email', emails);
   if (uErr) throw uErr;
 
@@ -183,12 +192,8 @@ async function getLeaderboard(tournament_id) {
   const wagerCounts = {};
   (wagers || []).forEach(w => { wagerCounts[w.user_email] = (wagerCounts[w.user_email] || 0) + 1; });
 
-  // Sum points_remaining across all kelly rounds for each player
-  const totals = {};
-  (bankrolls || []).forEach(b => { totals[b.user_email] = (totals[b.user_email] || 0) + b.points_remaining; });
-
-  return Object.entries(totals)
-    .map(([user_email, points]) => ({ user_email, name: nameMap[user_email] || user_email, points, wager_count: wagerCounts[user_email] || 0 }))
+  return (bankrolls || [])
+    .map(b => ({ user_email: b.user_email, name: nameMap[b.user_email] || b.user_email, points: b.points_remaining, wager_count: wagerCounts[b.user_email] || 0 }))
     .sort((a, b) => b.points - a.points);
 }
 

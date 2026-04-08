@@ -19,8 +19,8 @@ const TH = { ...MONO, fontSize: 11, letterSpacing: 1, color: 'var(--kelly)', pad
 const TD = { ...MONO, fontSize: 12, color: 'var(--chalk)', padding: '10px 12px', borderBottom: '1px solid rgba(77,189,92,0.08)' };
 const SEL = { background: '#fff', border: '1px solid var(--line)', color: '#111', padding: '6px 10px', ...MONO, fontSize: 12, outline: 'none' };
 
-// isAdmin: true = admin full log, false = player view (no pending)
-export default function WagerLog({ tournamentId, isAdmin = false }) {
+// isAdmin: true = admin full log, false = player view (own wagers only, no pending)
+export default function WagerLog({ tournamentId, isAdmin = false, user = null }) {
   const [wagers, setWagers] = useState([]);
   const [round, setRound] = useState('all');
   const [filterPlayer, setFilterPlayer] = useState('');
@@ -58,6 +58,7 @@ export default function WagerLog({ tournamentId, isAdmin = false }) {
 
   let filtered = wagers.filter(w => {
     if (!isAdmin && w.result === 'pending') return false;
+    if (!isAdmin && user && w.user_email !== user.email) return false;
     if (filterPlayer && (w.player_name || w.user_email) !== filterPlayer) return false;
     if (filterGolfer && w.golf_golfers?.name !== filterGolfer) return false;
     if (filterCategory && w.category !== filterCategory) return false;
@@ -80,6 +81,7 @@ export default function WagerLog({ tournamentId, isAdmin = false }) {
             {players.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         )}
+
         <select value={filterGolfer} onChange={e => setFilterGolfer(e.target.value)} style={SEL}>
           <option value="">All Golfers</option>
           {golfers.map(g => <option key={g} value={g}>{g}</option>)}
@@ -112,7 +114,7 @@ export default function WagerLog({ tournamentId, isAdmin = false }) {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {isAdmin && <th style={TH}>PLAYER</th>}
+                <th style={TH}>PLAYER</th>
                 <th style={TH}>RND</th>
                 <th style={TH}>GOLFER</th>
                 <th style={TH}>CATEGORY</th>
@@ -127,7 +129,7 @@ export default function WagerLog({ tournamentId, isAdmin = false }) {
                 const toWin = calcToWin(w.points_wagered, w.odds_at_time);
                 return (
                   <tr key={w.id}>
-                    {isAdmin && <td style={TD}>{w.player_name || w.user_email}</td>}
+                    <td style={TD}>{w.player_name || w.user_email}</td>
                     <td style={TD}>{w.kelly_round}</td>
                     <td style={TD}>{w.golf_golfers?.name || '—'}</td>
                     <td style={{ ...TD, textTransform: 'uppercase', letterSpacing: 1 }}>{w.category}</td>

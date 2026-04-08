@@ -447,7 +447,7 @@ function AppInner() {
         {tab==='picks'         && !liveUser.is_admin && (mode==='golf' ? <PicksGolf user={liveUser} tournamentId={golfTournamentId} onWagerPlaced={refreshGolfBankroll} /> : <PicksView         user={liveUser} appData={appData} onWageredChange={setLiveWagered} onUserUpdate={(u)=>{ setUser(u); sessionStorage.setItem('kelly_session',JSON.stringify(u)); }} />)}
         {tab==='board'         &&                      (mode==='golf' ? <LeaderboardGolf tournamentId={golfTournamentId} /> : <LeaderboardView   currentEmail={liveUser.email} appData={appData} />)}
         {tab==='history'       && !liveUser.is_admin && (mode==='golf' ? <HistoryGolf tournamentId={golfTournamentId} user={liveUser} /> : <HistoryView       user={liveUser} />)}
-        {tab==='waglog'        && !liveUser.is_admin && (mode==='golf' ? <WagerLogGolf tournamentId={golfTournamentId} /> : <PlayerWagerLogView />)}
+        {tab==='waglog'        && !liveUser.is_admin && (mode==='golf' ? <WagerLogGolf tournamentId={golfTournamentId} user={liveUser} /> : <PlayerWagerLogView />)}
         {tab==='rules'         && !liveUser.is_admin && (mode==='golf' ? <RulesGolf /> : <RulesView         user={liveUser} appData={appData} />)}
         {tab==='admin'         &&  liveUser.is_admin && <AdminView         appData={appData} onRefresh={loadAppData} />}
         {tab==='tracker'       &&  liveUser.is_admin && (mode==='golf' ? <GolfRoundTracker tournamentId={golfTournamentId} /> : <RoundTrackerView  appData={appData} />)}
