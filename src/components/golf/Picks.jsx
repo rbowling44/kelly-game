@@ -15,7 +15,15 @@ function fmtOdds(o) {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
-export default function Picks({ tournamentId, user }) {
+function calcToWin(pts, oddsStr) {
+  const p = parseInt(pts);
+  const o = Number(oddsStr);
+  if (!p || !o || isNaN(o)) return null;
+  const win = o > 0 ? Math.round(p * o / 100) : Math.round(p * 100 / Math.abs(o));
+  return win;
+}
+
+export default function Picks({ tournamentId, user, onWagerPlaced }) {
   const [golfers, setGolfers]       = useState([]);
   const [round, setRound]           = useState(1);
   const [bankroll, setBankroll]     = useState(null);
@@ -89,6 +97,7 @@ export default function Picks({ tournamentId, user }) {
       setBetAmount('');
       showFlash(`Wager placed on ${golfer.name}!`);
       await loadRound(round);
+      if (onWagerPlaced) onWagerPlaced();
     } catch (e) {
       showFlash('Error: ' + e.message, 'error');
     } finally {
@@ -275,6 +284,11 @@ function GolferCard({ golfer, activeBet, betAmount, submitting, onToggleBet, onB
               outline: 'none',
             }}
           />
+          {betAmount && calcToWin(betAmount, golfer.odds[activeCategory]) !== null && (
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: 'var(--kelly)', whiteSpace: 'nowrap' }}>
+              → TO WIN <strong>{calcToWin(betAmount, golfer.odds[activeCategory])} PTS</strong>
+            </div>
+          )}
           <button
             onClick={() => onSubmit(golfer, activeCategory)}
             disabled={submitting}

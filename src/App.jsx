@@ -361,20 +361,20 @@ function AppInner() {
     window.history.pushState({}, '', path);
   };
 
-  useEffect(() => {
-    if (mode !== 'golf' || !user || user.is_admin || !golfTournamentId) { setGolfBankrollPts(null); return; }
-    (async () => {
-      const { data: roundSetting } = await supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle();
-      const kellyRound = parseInt(roundSetting?.value || '1');
-      const { data } = await supabase.from('golf_bankrolls')
-        .select('points_remaining')
-        .eq('user_email', user.email)
-        .eq('tournament_id', golfTournamentId)
-        .eq('kelly_round', kellyRound)
-        .maybeSingle();
-      setGolfBankrollPts(data?.points_remaining ?? 0);
-    })();
-  }, [mode, user, golfTournamentId]);
+  const refreshGolfBankroll = async () => {
+    if (mode !== 'golf' || !user || user.is_admin || !golfTournamentId) return;
+    const { data: roundSetting } = await supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle();
+    const kellyRound = parseInt(roundSetting?.value || '1');
+    const { data } = await supabase.from('golf_bankrolls')
+      .select('points_remaining')
+      .eq('user_email', user.email)
+      .eq('tournament_id', golfTournamentId)
+      .eq('kelly_round', kellyRound)
+      .maybeSingle();
+    setGolfBankrollPts(data?.points_remaining ?? 0);
+  };
+
+  useEffect(() => { refreshGolfBankroll(); }, [mode, user, golfTournamentId]);
 
   useEffect(() => { if (user?.is_admin) refreshUnread(); }, [user]);
 
@@ -431,9 +431,9 @@ function AppInner() {
         )}
       </nav>
       <main className="main">
-        {tab==='picks'         && !liveUser.is_admin && (mode==='golf' ? <PicksGolf user={liveUser} tournamentId={golfTournamentId} /> : <PicksView         user={liveUser} appData={appData} onWageredChange={setLiveWagered} onUserUpdate={(u)=>{ setUser(u); sessionStorage.setItem('kelly_session',JSON.stringify(u)); }} />)}
+        {tab==='picks'         && !liveUser.is_admin && (mode==='golf' ? <PicksGolf user={liveUser} tournamentId={golfTournamentId} onWagerPlaced={refreshGolfBankroll} /> : <PicksView         user={liveUser} appData={appData} onWageredChange={setLiveWagered} onUserUpdate={(u)=>{ setUser(u); sessionStorage.setItem('kelly_session',JSON.stringify(u)); }} />)}
         {tab==='board'         &&                      (mode==='golf' ? <LeaderboardGolf tournamentId={golfTournamentId} /> : <LeaderboardView   currentEmail={liveUser.email} appData={appData} />)}
-        {tab==='history'       && !liveUser.is_admin && (mode==='golf' ? <HistoryGolf /> : <HistoryView       user={liveUser} />)}
+        {tab==='history'       && !liveUser.is_admin && (mode==='golf' ? <HistoryGolf tournamentId={golfTournamentId} user={liveUser} /> : <HistoryView       user={liveUser} />)}
         {tab==='waglog'        && !liveUser.is_admin && (mode==='golf' ? <WagerLogGolf tournamentId={golfTournamentId} /> : <PlayerWagerLogView />)}
         {tab==='rules'         && !liveUser.is_admin && (mode==='golf' ? <RulesGolf /> : <RulesView         user={liveUser} appData={appData} />)}
         {tab==='admin'         &&  liveUser.is_admin && <AdminView         appData={appData} onRefresh={loadAppData} />}

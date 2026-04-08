@@ -698,6 +698,32 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
           </select>
         </div>
       </div>
+
+      {/* ========================= DANGER ZONE ========================= */}
+      <div style={{ background: 'rgba(231,76,60,0.05)', border: '1px solid rgba(231,76,60,0.2)', padding: 20, marginBottom: 20 }}>
+        <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 2, color: 'var(--red)', marginBottom: 8 }}>DANGER ZONE</div>
+        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--chalk-dim)', marginBottom: 16, lineHeight: 1.6 }}>
+          Clears all wagers and bankrolls for the active tournament. Golfers and odds are kept. Use for testing only.
+        </div>
+        <button
+          style={{ ...STYLES.btn, background: 'var(--red)', color: '#fff', border: 'none' }}
+          disabled={loading}
+          onClick={async () => {
+            if (!tournamentId) return flashSettings('No active tournament.');
+            if (!window.confirm('⚠️ RESET ALL GOLF DATA?\n\nThis will delete all wagers and bankrolls for this tournament.\nGolfers and odds are kept.\n\nThis cannot be undone.')) return;
+            setLoading(true);
+            await Promise.all([
+              supabase.from('golf_wagers').delete().eq('tournament_id', tournamentId),
+              supabase.from('golf_bankrolls').delete().eq('tournament_id', tournamentId),
+            ]);
+            await loadData();
+            setLoading(false);
+            flashSuccess('Golf data reset. Wagers and bankrolls cleared.');
+          }}
+        >
+          🗑 RESET ALL GOLF WAGERS &amp; BANKROLLS
+        </button>
+      </div>
     </div>
   );
 }

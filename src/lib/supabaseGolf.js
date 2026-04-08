@@ -91,18 +91,36 @@ async function syncLeaderboardToGolfers(tournament_id) {
 }
 
 async function getLeaderboard(tournament_id) {
-  // Aggregate points from golf_wagers per user to present leaderboard across rounds
-  const { data, error } = await supabase.rpc('get_golf_leaderboard', { p_tournament_id: tournament_id }).catch(() => ({ data: null, error: null }));
-  if (error) throw error;
-  if (data) return data;
-  // fallback: compute from golf_wagers
-  const { data: rows, error: e2 } = await supabase.from('golf_wagers').select('user_email, points_won').eq('tournament_id', tournament_id);
-  if (e2) throw e2;
-  const agg = {};
-  for (const r of rows || []) {
-    agg[r.user_email] = (agg[r.user_email] || 0) + (r.points_won || 0);
-  }
-  return Object.entries(agg).map(([user_email, points]) => ({ user_email, points }));
+  // Use golf_bankrolls as the source of truth — sum points_remaining across rounds per player
+  const { data: bankrolls, error: bErr } = await supabase
+    .from('golf_bankrolls')
+    .select('user_email, points_remaining')
+    .eq('tournament_id', tournament_id);
+  if (bErr) throw bErr;
+
+  const { data: wagers, error: wErr } = await supabase
+    .from('golf_wagers')
+    .select('user_email')
+    .eq('tournament_id', tournament_id);
+  if (wErr) throw wErr;
+
+  const emails = [...new Set((bankrolls || []).map(b => b.user_email))];
+  const { data: users, error: uErr } = await supabase.from('users').select('email, name').in('email', emails);
+  if (uErr) throw uErr;
+
+  const nameMap = {};
+  (users || []).forEach(u => { nameMap[u.email] = u.name; });
+
+  const wagerCounts = {};
+  (wagers || []).forEach(w => { wagerCounts[w.user_email] = (wagerCounts[w.user_email] || 0) + 1; });
+
+  // Sum points_remaining across all kelly rounds for each player
+  const totals = {};
+  (bankrolls || []).forEach(b => { totals[b.user_email] = (totals[b.user_email] || 0) + b.points_remaining; });
+
+  return Object.entries(totals)
+    .map(([user_email, points]) => ({ user_email, name: nameMap[user_email] || user_email, points, wager_count: wagerCounts[user_email] || 0 }))
+    .sort((a, b) => b.points - a.points);
 }
 
 async function addGolfer(tournament_id, name) {
@@ -188,7 +206,7 @@ async function ensureBankroll(tournament_id, kelly_round, user_id) {
     .from('golf_bankrolls')
     .insert({ tournament_id, kelly_round, user_email: user_id, starting_points: startPts, points_remaining: startPts })
     .select()
-    .single();
+    .maybeSingle();
   if (error) throw error;
   return data;
 }
