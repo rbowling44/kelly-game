@@ -9,7 +9,7 @@ export default function GolfModeToggle() {
   useEffect(() => {
     // load saved mode from settings
     (async () => {
-      const { data } = await supabase.from('settings').select('value').eq('key', 'app_mode').single();
+      const { data } = await supabase.from('settings').select('value').eq('key', 'app_mode').maybeSingle();
       if (data?.value) setMode(data.value);
     })();
   }, []);

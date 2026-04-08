@@ -51,18 +51,24 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
 
     // Auto-create bankrolls for all non-admin users who don't have one yet
     if (tournamentId) {
-      const { data: allUsers } = await supabase.from('users').select('email').eq('is_admin', false);
+      const { data: allUsers } = await supabase.from('users').select('email, is_admin');
+      const nonAdmins = (allUsers || []).filter(u => !u.is_admin);
       const { data: existing } = await supabase.from('golf_bankrolls').select('user_id').eq('tournament_id', tournamentId).eq('kelly_round', 1);
       const existingSet = new Set((existing || []).map(b => b.user_id));
-      const toInsert = (allUsers || [])
+      const toInsert = nonAdmins
         .filter(u => !existingSet.has(u.email))
-        .map(u => ({ user_id: u.email, tournament_id: tournamentId, kelly_round: 1, starting_points: val, points_remaining: val }));
-      if (toInsert.length) {
-        await supabase.from('golf_bankrolls').insert(toInsert);
+        .map(u => ({ user_id: u.email, tournament_id: Number(tournamentId), kelly_round: 1, starting_points: val, points_remaining: val }));
+      // Insert one at a time so a single failure doesn't block the rest
+      let created = 0;
+      for (const row of toInsert) {
+        const { error: iErr } = await supabase.from('golf_bankrolls').insert(row);
+        if (!iErr) created++;
       }
       await loadData();
+      flashSettings(`Starting points set to ${val}. Created bankrolls for ${created} player(s).`);
+    } else {
+      flashSettings(`Starting points set to ${val}.`);
     }
-    flashSettings(`Starting points set to ${val}. Bankrolls created for all players.`);
   };
 
   const handleTogglePaid = async (email) => {
