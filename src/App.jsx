@@ -220,9 +220,9 @@ const DB = {
   async roundStatus()         { return (await DB.getSetting('round_status')) || {}; },
   async registrationLocked()  { return (await DB.getSetting('registration_locked')) === 'true'; },
 
-  async getUser(email)  { const {data} = await supabase.from('users').select('*').eq('email',email.toLowerCase()).single(); return data; },
+  async getUser(email)  { const {data} = await supabase.from('users').select('*').eq('email',email.toLowerCase()).maybeSingle(); return data; },
   async getAllUsers()    { const {data} = await supabase.from('users').select('*'); return data||[]; },
-  async upsertUser(u)   { await supabase.from('users').upsert(u); },
+  async upsertUser(u)   { const {error} = await supabase.from('users').upsert(u, {onConflict:'email'}); if (error) throw error; },
   async updateUser(email, fields) { const {error} = await supabase.from('users').update(fields).eq('email', email); return error; },
 
   async getGames(round) { const q = supabase.from('games').select('*'); if(round) q.eq('round',round); const {data}=await q; return data||[]; },
@@ -384,8 +384,16 @@ function AppInner() {
     if (u.is_admin) {
       refreshUnread();
     } else {
-      // Always land on picks after login — in golf mode this renders the Golf picks page
-      navigate('picks');
+      // Read mode directly from localStorage to avoid any context timing issues.
+      // Both NCAA and Golf use tab='picks'; the render switches on mode to show
+      // PicksGolf vs PicksView. Explicitly setting tab here guarantees the right
+      // page shows regardless of what the URL routing effect resolved to.
+      const storedMode = localStorage.getItem('kelly_mode');
+      if (storedMode === 'golf') {
+        setTab('picks');
+      } else {
+        setTab('picks'); // NCAA default is also the picks/games tab
+      }
     }
   };
   const logout = () => { setUser(null); sessionStorage.removeItem('kelly_session'); setTab("picks"); };
@@ -475,7 +483,14 @@ function AuthScreen({ onLogin, registrationLocked, golfMode, golfTournamentId })
       if (existing) { setError("Email already registered."); setBusy(false); return; }
       const [cr, sp] = await Promise.all([DB.currentRound(), DB.startingPoints()]);
       const newUser = { email: email.toLowerCase(), name, password: btoa(password), is_admin: false, rounds: {[cr]: sp}, history: [] };
-      await DB.upsertUser(newUser);
+      try {
+        await DB.upsertUser(newUser);
+      } catch (e) {
+        console.error('Registration insert failed:', e);
+        setError('Registration failed: ' + (e?.message || 'database error. Please try again.'));
+        setBusy(false);
+        return;
+      }
       // If golf mode is active, create Round 1 bankroll for this new player
       if (golfMode && golfTournamentId) {
         const { data: gsp } = await supabase.from('settings').select('value').eq('key', 'golf_starting_points').maybeSingle();
