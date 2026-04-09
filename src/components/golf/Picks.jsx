@@ -134,6 +134,20 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
     return <div className="empty-state">No active golf tournament. Ask the commissioner to set one up.</div>;
   }
 
+  // Inactive player check — shown before the locked/open split
+  if (bankroll && bankroll.golf_active === false) {
+    return (
+      <div style={{ maxWidth: 800, margin: '0 auto', padding: '40px 0' }}>
+        <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', padding: '32px', textAlign: 'center' }}>
+          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 28, letterSpacing: 3, color: 'var(--chalk-dim)', marginBottom: 12 }}>NOT ACTIVE</div>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: 'var(--chalk-dim)', lineHeight: 1.9 }}>
+            You are not active in this tournament.<br />Contact the commissioner if you believe this is an error.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const withOdds    = golfers.filter(g => Object.keys(g.odds || {}).length > 0);
   const withoutOdds = golfers.filter(g => !Object.keys(g.odds || {}).length);
 

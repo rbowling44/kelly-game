@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer, toggleGolferCut, completeTournament } from '../../lib/supabaseGolf.js';
+import { addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer, toggleGolferCut, completeTournament, setPlayerActive } from '../../lib/supabaseGolf.js';
 import { supabase } from '../../lib/supabaseClient.js';
 import SettleRound from './SettleRound.jsx';
 
@@ -25,6 +25,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
   const [golfStartingPoints, setGolfStartingPoints] = useState('500');
   const [wagerWindowOpen, setWagerWindowOpen] = useState('true');
   const [activeGolfRound, setActiveGolfRound] = useState('1');
+  const [golfRegistrationLocked, setGolfRegistrationLocked] = useState('false');
   const [settingsMsg, setSettingsMsg] = useState('');
 
   useEffect(() => {
@@ -33,14 +34,16 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
   }, [tournamentId, selectedRound]);
 
   const loadSettings = async () => {
-    const [sp, ww, ar] = await Promise.all([
+    const [sp, ww, ar, rl] = await Promise.all([
       supabase.from('settings').select('value').eq('key', 'golf_starting_points').maybeSingle(),
       supabase.from('settings').select('value').eq('key', 'golf_wager_window_open').maybeSingle(),
       supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle(),
+      supabase.from('settings').select('value').eq('key', 'golf_registration_locked').maybeSingle(),
     ]);
     if (sp.data?.value) setGolfStartingPoints(sp.data.value);
     if (ww.data?.value) setWagerWindowOpen(ww.data.value);
     if (ar.data?.value) setActiveGolfRound(ar.data.value);
+    if (rl.data?.value) setGolfRegistrationLocked(rl.data.value);
   };
 
   const flashSettings = (msg) => { setSettingsMsg(msg); setTimeout(() => setSettingsMsg(''), 3000); };
@@ -109,16 +112,36 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
     if (!window.confirm(`Are you sure you want to remove ${p?.name} from this golf tournament?\n\nThis will delete their wagers and bankroll but keep their account for the NCAA game.`)) return;
     setLoading(true);
     setError('');
+
+    // Ensure tournament_id is an integer — Supabase is strict about type matching
+    const tid = parseInt(tournamentId);
+    console.log('[REMOVE PLAYER] Starting delete for:', { email, tournamentId: tid, tournamentIdRaw: tournamentId });
+
     try {
-      const [wagersRes, bankrollsRes] = await Promise.all([
-        supabase.from('golf_wagers').delete().eq('user_email', email).eq('tournament_id', tournamentId),
-        supabase.from('golf_bankrolls').delete().eq('user_email', email).eq('tournament_id', tournamentId),
-      ]);
-      if (wagersRes.error) throw wagersRes.error;
-      if (bankrollsRes.error) throw bankrollsRes.error;
+      console.log('[REMOVE PLAYER] Deleting golf_wagers where user_email =', email, 'AND tournament_id =', tid);
+      const wagersRes = await supabase
+        .from('golf_wagers')
+        .delete()
+        .eq('user_email', email)
+        .eq('tournament_id', tid);
+      console.log('[REMOVE PLAYER] golf_wagers result:', { data: wagersRes.data, error: wagersRes.error, status: wagersRes.status, statusText: wagersRes.statusText });
+
+      console.log('[REMOVE PLAYER] Deleting golf_bankrolls where user_email =', email, 'AND tournament_id =', tid);
+      const bankrollsRes = await supabase
+        .from('golf_bankrolls')
+        .delete()
+        .eq('user_email', email)
+        .eq('tournament_id', tid);
+      console.log('[REMOVE PLAYER] golf_bankrolls result:', { data: bankrollsRes.data, error: bankrollsRes.error, status: bankrollsRes.status, statusText: bankrollsRes.statusText });
+
+      if (wagersRes.error) throw new Error('golf_wagers delete failed: ' + wagersRes.error.message);
+      if (bankrollsRes.error) throw new Error('golf_bankrolls delete failed: ' + bankrollsRes.error.message);
+
+      console.log('[REMOVE PLAYER] Both deletes succeeded. Reloading data...');
       await loadData();
       flashSuccess(`${p?.name} removed from tournament.`);
     } catch (e) {
+      console.error('[REMOVE PLAYER] Error:', e);
       setError('Remove failed: ' + e.message);
     } finally {
       setLoading(false);
@@ -150,7 +173,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
         getGolfers(tournamentId),
         supabase.from('users').select('email, name, paid').eq('is_admin', false),
         supabase.from('golf_bankrolls')
-          .select('user_email, starting_points, points_remaining')
+          .select('user_email, starting_points, points_remaining, golf_active')
           .eq('tournament_id', tournamentId)
           .eq('kelly_round', bankrollRound),
       ]);
@@ -170,6 +193,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
         paid: u.paid || false,
         starting_points: bankrollMap[u.email]?.starting_points ?? 0,
         points_remaining: bankrollMap[u.email]?.points_remaining ?? 0,
+        golf_active: bankrollMap[u.email]?.golf_active !== false, // default true if no bankroll yet
       })));
 
       // Load odds for the selected round (odds editor uses selectedRound independently)
@@ -606,10 +630,13 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
           <div style={{ color: 'var(--chalk-dim)', fontFamily: "'DM Mono', monospace", fontSize: 12 }}>No players yet.</div>
         ) : (
           players.map(p => (
-            <div key={p.user_id} style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(77,189,92,0.1)', padding: '14px 16px', marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            <div key={p.user_id} style={{ background: p.golf_active ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.35)', border: p.golf_active ? '1px solid rgba(77,189,92,0.1)' : '1px solid rgba(255,255,255,0.06)', padding: '14px 16px', marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', opacity: p.golf_active ? 1 : 0.6 }}>
               {/* Name + email */}
               <div style={{ flex: 1, minWidth: 140 }}>
-                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 600, fontSize: 16, color: 'var(--chalk)' }}>{p.name || 'Unknown'}</div>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 600, fontSize: 16, color: p.golf_active ? 'var(--chalk)' : 'var(--chalk-dim)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {p.name || 'Unknown'}
+                  {!p.golf_active && <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 1, padding: '2px 7px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', color: 'var(--chalk-dim)' }}>INACTIVE</span>}
+                </div>
                 <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: 'var(--chalk-dim)' }}>{p.email}</div>
               </div>
 
@@ -617,6 +644,29 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
               <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, color: 'var(--gold)', whiteSpace: 'nowrap' }}>
                 {p.points_remaining} <span style={{ fontSize: 10, color: 'var(--chalk-dim)' }}>/ {p.starting_points} PTS</span>
               </div>
+
+              {/* Active/Inactive toggle */}
+              <button
+                onClick={async () => {
+                  setLoading(true);
+                  try {
+                    await setPlayerActive(tournamentId, p.email, !p.golf_active);
+                    await loadData();
+                    flashSuccess(`${p.name} marked as ${!p.golf_active ? 'ACTIVE' : 'INACTIVE'}.`);
+                  } catch (e) {
+                    setError('Could not update active status: ' + e.message);
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                disabled={loading}
+                style={{
+                  fontFamily: "'DM Mono', monospace", fontSize: 11, padding: '4px 12px', cursor: 'pointer', letterSpacing: 1,
+                  background: p.golf_active ? 'rgba(77,189,92,0.1)' : 'rgba(255,255,255,0.05)',
+                  border: p.golf_active ? '1px solid rgba(77,189,92,0.3)' : '1px solid rgba(255,255,255,0.15)',
+                  color: p.golf_active ? 'var(--kelly)' : 'var(--chalk-dim)',
+                }}
+              >{p.golf_active ? '✓ ACTIVE' : '○ INACTIVE'}</button>
 
               {/* Paid toggle */}
               <button
@@ -711,6 +761,36 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
               onClick={() => saveWagerWindow('false')}
               disabled={loading}
             >CLOSED</button>
+          </div>
+        </div>
+
+        {/* Registration Lock */}
+        <div style={{ background: golfRegistrationLocked === 'true' ? 'rgba(231,76,60,0.06)' : 'rgba(77,189,92,0.05)', border: golfRegistrationLocked === 'true' ? '1px solid rgba(231,76,60,0.3)' : '1px solid rgba(77,189,92,0.15)', padding: 16, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--chalk-dim)', letterSpacing: 1, marginBottom: 4 }}>GOLF REGISTRATION</div>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: golfRegistrationLocked === 'true' ? 'var(--red)' : 'var(--kelly)' }}>
+              {golfRegistrationLocked === 'true' ? 'LOCKED — New registrations disabled' : 'OPEN — New players can register'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              style={{ ...STYLES.btn, ...(golfRegistrationLocked !== 'true' ? STYLES.btnKelly : STYLES.btnGhost) }}
+              onClick={async () => {
+                setGolfRegistrationLocked('false');
+                await supabase.from('settings').upsert({ key: 'golf_registration_locked', value: 'false' });
+                flashSettings('Golf registration opened.');
+              }}
+              disabled={loading}
+            >OPEN</button>
+            <button
+              style={{ ...STYLES.btn, ...(golfRegistrationLocked === 'true' ? { background: 'var(--red)', color: '#fff' } : STYLES.btnGhost) }}
+              onClick={async () => {
+                setGolfRegistrationLocked('true');
+                await supabase.from('settings').upsert({ key: 'golf_registration_locked', value: 'true' });
+                flashSettings('Golf registration locked.');
+              }}
+              disabled={loading}
+            >LOCK</button>
           </div>
         </div>
 

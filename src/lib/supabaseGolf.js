@@ -173,7 +173,7 @@ async function getLeaderboard(tournament_id) {
 
   const { data: bankrolls, error: bErr } = await supabase
     .from('golf_bankrolls')
-    .select('user_email, points_remaining')
+    .select('user_email, points_remaining, golf_active')
     .eq('tournament_id', tournament_id)
     .eq('kelly_round', activeRound);
   if (bErr) throw bErr;
@@ -197,6 +197,7 @@ async function getLeaderboard(tournament_id) {
   (wagers || []).forEach(w => { wagerCounts[w.user_email] = (wagerCounts[w.user_email] || 0) + 1; });
 
   return (bankrolls || [])
+    .filter(b => b.golf_active !== false) // exclude inactive players
     .map(b => ({ user_email: b.user_email, name: nameMap[b.user_email] || b.user_email, points: b.points_remaining, wager_count: wagerCounts[b.user_email] || 0 }))
     .sort((a, b) => b.points - a.points);
 }
@@ -270,7 +271,7 @@ async function getPlayerBankrollsForRound(tournament_id, kelly_round) {
 async function ensureBankroll(tournament_id, kelly_round, user_id) {
   const { data: existing } = await supabase
     .from('golf_bankrolls')
-    .select('id, starting_points, points_remaining')
+    .select('id, starting_points, points_remaining, golf_active')
     .eq('tournament_id', tournament_id)
     .eq('kelly_round', kelly_round)
     .eq('user_email', user_id)
@@ -305,6 +306,18 @@ async function getWagersForRound(tournament_id, kelly_round) {
   const userMap = {};
   (users || []).forEach(u => { userMap[u.email] = u.name; });
   return (data || []).map(w => ({ ...w, player_name: userMap[w.user_email] || 'Unknown' }));
+}
+
+async function setPlayerActive(tournament_id, user_email, active) {
+  // Updates ALL kelly_round rows for this player in this tournament
+  const updates = { golf_active: active };
+  if (!active) updates.points_remaining = 0; // zero out points when deactivating
+  const { error } = await supabase
+    .from('golf_bankrolls')
+    .update(updates)
+    .eq('tournament_id', parseInt(tournament_id))
+    .eq('user_email', user_email);
+  if (error) throw error;
 }
 
 async function toggleGolferCut(golfer_id, made_cut) {
@@ -350,4 +363,4 @@ async function getFinalStandings(tournament_id) {
     .sort((a, b) => b.points - a.points);
 }
 
-export { placeWager, settleRound, settleRoundClient, upsertGolfers, upsertOdds, getTournament, getGolfersWithOdds, getUserWagers, getWagerLog, syncLeaderboardToGolfers, getLeaderboard, addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer, getPlayerBankrollsForRound, getWagersForRound, ensureBankroll, toggleGolferCut, completeTournament, getFinalStandings };
+export { placeWager, settleRound, settleRoundClient, upsertGolfers, upsertOdds, getTournament, getGolfersWithOdds, getUserWagers, getWagerLog, syncLeaderboardToGolfers, getLeaderboard, addGolfer, deleteGolfer, getGolfers, saveGolferOdds, getOddsForGolfer, getPlayerBankrollsForRound, getWagersForRound, ensureBankroll, toggleGolferCut, completeTournament, getFinalStandings, setPlayerActive };

@@ -324,8 +324,8 @@ function AppInner() {
   }, []);
 
   const loadAppData = async () => {
-    const [cr, sp, rs, tc, rl, appMode, activeGolfTournamentId] = await Promise.all([DB.currentRound(), DB.startingPoints(), DB.roundStatus(), DB.getSetting('tournament_complete'), DB.registrationLocked(), DB.getSetting('app_mode'), DB.getActiveGolfTournamentId()]);
-    setAppData({ currentRound:cr, startingPoints:sp, roundStatus:rs, tournamentComplete: tc === 'true', registrationLocked: rl });
+    const [cr, sp, rs, tc, rl, appMode, activeGolfTournamentId, golfRegLocked] = await Promise.all([DB.currentRound(), DB.startingPoints(), DB.roundStatus(), DB.getSetting('tournament_complete'), DB.registrationLocked(), DB.getSetting('app_mode'), DB.getActiveGolfTournamentId(), DB.getSetting('golf_registration_locked')]);
+    setAppData({ currentRound:cr, startingPoints:sp, roundStatus:rs, tournamentComplete: tc === 'true', registrationLocked: rl, golfRegistrationLocked: golfRegLocked === 'true' });
     if (appMode) { setMode(appMode); try { localStorage.setItem('kelly_mode', appMode); } catch(e) {} }
     if (activeGolfTournamentId) {
       setGolfTournamentId(activeGolfTournamentId);
@@ -405,7 +405,7 @@ function AppInner() {
   const logout = () => { setUser(null); sessionStorage.removeItem('kelly_session'); setTab("picks"); };
 
   if (loading) return <div className="loading"><span className="spinner"/>LOADING THE KELLY GAME...</div>;
-  if (!user)   return <AuthScreen onLogin={login} registrationLocked={appData.registrationLocked} golfMode={mode === 'golf'} golfTournamentId={golfTournamentId} />;
+  if (!user)   return <AuthScreen onLogin={login} registrationLocked={appData.registrationLocked} golfRegistrationLocked={appData.golfRegistrationLocked} golfMode={mode === 'golf'} golfTournamentId={golfTournamentId} />;
 
   // Use freshUser points from DB if available via session
   const savedSession = sessionStorage.getItem('kelly_session');
@@ -467,7 +467,7 @@ function AppInner() {
 // ============================================================
 // AUTH
 // ============================================================
-function AuthScreen({ onLogin, registrationLocked, golfMode, golfTournamentId }) {
+function AuthScreen({ onLogin, registrationLocked, golfRegistrationLocked, golfMode, golfTournamentId }) {
   const [mode, setMode]   = useState("login");
   const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [name, setName] = useState("");
   const [forgotEmail, setForgotEmail] = useState("");
@@ -483,7 +483,8 @@ function AuthScreen({ onLogin, registrationLocked, golfMode, golfTournamentId })
       if (!u || u.password !== btoa(password)) { setError("Invalid credentials."); setBusy(false); return; }
       onLogin(u);
     } else {
-      if (registrationLocked) { setError("Registration is currently closed. Contact the commissioner to join."); setBusy(false); return; }
+      if (golfMode && golfRegistrationLocked) { setError("Registration is currently closed for this tournament. Contact the commissioner to join."); setBusy(false); return; }
+      if (!golfMode && registrationLocked) { setError("Registration is currently closed. Contact the commissioner to join."); setBusy(false); return; }
       if (!name) { setError("Name required."); setBusy(false); return; }
       const existing = await DB.getUser(email);
       if (existing) { setError("Email already registered."); setBusy(false); return; }
