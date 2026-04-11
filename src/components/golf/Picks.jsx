@@ -148,17 +148,31 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
     );
   }
 
-  // Sort key: negative odds first (most negative = shortest = top), then positive ascending, then no leader odds
-  function leaderOddsRank(g) {
-    const o = Number(g.odds?.leader);
-    if (!g.odds?.leader || isNaN(o)) return Infinity; // no leader odds → bottom
-    if (o < 0) return o;           // e.g. -200 → -200, -150 → -150 (more negative = smaller = sorts first)
-    return o + 100000;             // positive odds shifted well above 0 so they follow all negatives
+  // Sort key — three tiers:
+  //   Tier 0: real odds  (negative first, then positive low→high)
+  //   Tier 1: zero / missing leader odds
+  //   Tier 2: missed cut (made_cut === false)
+  function golferSortKey(g) {
+    if (g.made_cut === false) return [2, 0];          // always last
+
+    const raw = g.odds?.leader;
+    const o = Number(raw);
+    if (!raw || isNaN(o) || o === 0) return [1, 0];  // zero / no odds → middle tier
+
+    // Real odds: negative sorts as-is (e.g. -200 < -150), positive shifted past 0
+    return [0, o < 0 ? o : o + 100000];
   }
 
-  const withOdds    = golfers.filter(g => Object.keys(g.odds || {}).length > 0)
-                             .sort((a, b) => leaderOddsRank(a) - leaderOddsRank(b));
-  const withoutOdds = golfers.filter(g => !Object.keys(g.odds || {}).length);
+  function cmpGolfers(a, b) {
+    const [ta, va] = golferSortKey(a);
+    const [tb, vb] = golferSortKey(b);
+    if (ta !== tb) return ta - tb;
+    return va - vb;
+  }
+
+  const sortedGolfers = [...golfers].sort(cmpGolfers);
+  const withOdds      = sortedGolfers.filter(g => Object.keys(g.odds || {}).length > 0);
+  const withoutOdds   = sortedGolfers.filter(g => !Object.keys(g.odds || {}).length);
 
   // ── Locked picks view ─────────────────────────────────────
   if (!wagerWindowOpen) {
