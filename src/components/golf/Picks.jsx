@@ -148,7 +148,16 @@ export default function Picks({ tournamentId, user, onWagerPlaced }) {
     );
   }
 
-  const withOdds    = golfers.filter(g => Object.keys(g.odds || {}).length > 0);
+  // Sort key: negative odds first (most negative = shortest = top), then positive ascending, then no leader odds
+  function leaderOddsRank(g) {
+    const o = Number(g.odds?.leader);
+    if (!g.odds?.leader || isNaN(o)) return Infinity; // no leader odds → bottom
+    if (o < 0) return o;           // e.g. -200 → -200, -150 → -150 (more negative = smaller = sorts first)
+    return o + 100000;             // positive odds shifted well above 0 so they follow all negatives
+  }
+
+  const withOdds    = golfers.filter(g => Object.keys(g.odds || {}).length > 0)
+                             .sort((a, b) => leaderOddsRank(a) - leaderOddsRank(b));
   const withoutOdds = golfers.filter(g => !Object.keys(g.odds || {}).length);
 
   // ── Locked picks view ─────────────────────────────────────
