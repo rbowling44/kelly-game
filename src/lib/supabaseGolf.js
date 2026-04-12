@@ -168,40 +168,63 @@ async function syncLeaderboardToGolfers(tournament_id) {
 }
 
 async function getLeaderboard(tournament_id) {
-  // Always read from the active kelly round — this is where overrides are written and where
-  // settled points_remaining lives after settleRoundClient runs.
-  const { data: roundSetting } = await supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle();
-  const activeRound = parseInt(roundSetting?.value || '1');
-  if (!activeRound) return [];
+  // Score per player:
+  //   if override_points > 0 on any bankroll row → use that value (replaces calculated total)
+  //   otherwise → SUM(points_won) from settled won wagers across all rounds
+  // Never reads points_remaining — stays static during active betting.
 
+  // 1. All bankroll rows — need override_points and golf_active status
   const { data: bankrolls, error: bErr } = await supabase
     .from('golf_bankrolls')
-    .select('user_email, points_remaining, golf_active')
-    .eq('tournament_id', tournament_id)
-    .eq('kelly_round', activeRound);
+    .select('user_email, override_points, golf_active')
+    .eq('tournament_id', tournament_id);
   if (bErr) throw bErr;
 
-  const { data: wagers, error: wErr } = await supabase
+  if (!bankrolls || !bankrolls.length) return [];
+
+  // Collapse multiple kelly_round rows per player into one record
+  const bankrollMap = {};
+  (bankrolls).forEach(b => {
+    if (!bankrollMap[b.user_email]) {
+      bankrollMap[b.user_email] = { override_points: 0, golf_active: true };
+    }
+    // Take the highest non-zero override across rounds (admin sets it on the active round row)
+    if ((b.override_points || 0) > bankrollMap[b.user_email].override_points) {
+      bankrollMap[b.user_email].override_points = b.override_points || 0;
+    }
+    // If ANY round marks them inactive, treat as inactive
+    if (b.golf_active === false) bankrollMap[b.user_email].golf_active = false;
+  });
+
+  // 2. All winning wagers for this tournament (only needed for players with no override)
+  const { data: wonWagers, error: wErr } = await supabase
     .from('golf_wagers')
-    .select('user_email')
+    .select('user_email, points_won')
     .eq('tournament_id', tournament_id)
-    .eq('kelly_round', activeRound);
+    .eq('result', 'won');
   if (wErr) throw wErr;
 
-  const emails = [...new Set((bankrolls || []).map(b => b.user_email))];
-  if (!emails.length) return [];
+  const wonMap = {};
+  (wonWagers || []).forEach(w => {
+    wonMap[w.user_email] = (wonMap[w.user_email] || 0) + (w.points_won || 0);
+  });
+
+  // 3. Resolve names
+  const emails = Object.keys(bankrollMap);
   const { data: users, error: uErr } = await supabase.from('users').select('email, name').in('email', emails);
   if (uErr) throw uErr;
 
   const nameMap = {};
   (users || []).forEach(u => { nameMap[u.email] = u.name; });
 
-  const wagerCounts = {};
-  (wagers || []).forEach(w => { wagerCounts[w.user_email] = (wagerCounts[w.user_email] || 0) + 1; });
-
-  return (bankrolls || [])
-    .filter(b => b.golf_active !== false) // exclude inactive players
-    .map(b => ({ user_email: b.user_email, name: nameMap[b.user_email] || b.user_email, points: b.points_remaining, wager_count: wagerCounts[b.user_email] || 0 }))
+  // 4. Build leaderboard — override replaces calculated total, never adds to it
+  return emails
+    .filter(email => bankrollMap[email].golf_active !== false)
+    .map(email => {
+      const override = bankrollMap[email].override_points || 0;
+      const points = override > 0 ? override : (wonMap[email] || 0);
+      return { user_email: email, name: nameMap[email] || email, points };
+    })
     .sort((a, b) => b.points - a.points);
 }
 

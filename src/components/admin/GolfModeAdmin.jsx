@@ -88,9 +88,11 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
     const val = parseInt(editPts[email]);
     if (isNaN(val) || val < 0) return flashSuccess('Enter a valid point value.');
     const p = players.find(x => x.email === email);
-    // Use activeBankrollRound — the round loadData reads from — NOT selectedRound (odds editor dropdown)
+    // Write to activeBankrollRound row:
+    //   points_remaining — what the player sees on their picks page bankroll
+    //   override_points  — what the leaderboard adds on top of their won-wager sum
     const { error } = await supabase.from('golf_bankrolls')
-      .update({ points_remaining: val })
+      .update({ points_remaining: val, override_points: val })
       .eq('user_email', email)
       .eq('tournament_id', tournamentId)
       .eq('kelly_round', activeBankrollRound);
