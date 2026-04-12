@@ -18,6 +18,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
   const [selectedRound, setSelectedRound] = useState(activeKellyRound);
   
   const [players, setPlayers] = useState([]);
+  const [activeBankrollRound, setActiveBankrollRound] = useState(1); // tracks which round loadData read bankrolls from
   const [editPts, setEditPts] = useState({});
   const [editPwd, setEditPwd] = useState({});
 
@@ -87,15 +88,16 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
     const val = parseInt(editPts[email]);
     if (isNaN(val) || val < 0) return flashSuccess('Enter a valid point value.');
     const p = players.find(x => x.email === email);
+    // Use activeBankrollRound — the round loadData reads from — NOT selectedRound (odds editor dropdown)
     const { error } = await supabase.from('golf_bankrolls')
       .update({ points_remaining: val })
       .eq('user_email', email)
       .eq('tournament_id', tournamentId)
-      .eq('kelly_round', selectedRound);
+      .eq('kelly_round', activeBankrollRound);
     if (error) return setError(error.message);
     setEditPts(prev => ({ ...prev, [email]: '' }));
     setPlayers(prev => prev.map(x => x.email === email ? { ...x, points_remaining: val } : x));
-    flashSuccess(`Updated ${p.name} to ${val} pts.`);
+    flashSuccess(`Updated ${p.name} to ${val} pts (Round ${activeBankrollRound}).`);
   };
 
   const handleResetPassword = async (email) => {
@@ -168,6 +170,7 @@ export default function GolfModeAdmin({ tournamentId, activeKellyRound = 1 }) {
       // Read active golf kelly round from settings — do not use selectedRound (which is the NCAA round)
       const { data: arSetting } = await supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle();
       const bankrollRound = parseInt(arSetting?.value || '1');
+      setActiveBankrollRound(bankrollRound); // persist so handleOverridePoints uses the same round
 
       const [g, usersRes, bankrollsRes] = await Promise.all([
         getGolfers(tournamentId),
