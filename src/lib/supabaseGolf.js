@@ -117,18 +117,20 @@ async function getTournament(id) {
 async function getGolfersWithOdds(tournament_id, kelly_round) {
   const { data, error } = await supabase
     .from('golf_golfers')
-    .select(`id, name, datagolf_id, made_cut, final_position, golf_odds(id, category, american_odds, set_by)`)
+    .select(`id, name, datagolf_id, made_cut, final_position, golf_odds(id, category, american_odds, kelly_round, set_by)`)
     .eq('tournament_id', tournament_id)
     .order('name', { ascending: true });
   if (error) throw error;
-  // reshape so golf_odds entries are easier to consume
+  // reshape — only use odds rows that match the requested kelly_round
   return (data || []).map(g => ({
     id: g.id,
     name: g.name,
     datagolf_id: g.datagolf_id,
     made_cut: g.made_cut,
     final_position: g.final_position,
-    odds: (g.golf_odds || []).reduce((acc, o) => { acc[o.category] = o.american_odds; return acc; }, {})
+    odds: (g.golf_odds || [])
+      .filter(o => o.kelly_round === kelly_round)
+      .reduce((acc, o) => { acc[o.category] = o.american_odds; return acc; }, {})
   }));
 }
 
