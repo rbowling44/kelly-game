@@ -168,10 +168,11 @@ async function syncLeaderboardToGolfers(tournament_id) {
 }
 
 async function getLeaderboard(tournament_id) {
-  // Only show the last SETTLED round — stays static between admin settles
-  const { data: roundSetting } = await supabase.from('settings').select('value').eq('key', 'golf_last_settled_round').maybeSingle();
-  const activeRound = parseInt(roundSetting?.value || '0');
-  if (!activeRound) return []; // no rounds settled yet
+  // Always read from the active kelly round — this is where overrides are written and where
+  // settled points_remaining lives after settleRoundClient runs.
+  const { data: roundSetting } = await supabase.from('settings').select('value').eq('key', 'golf_active_kelly_round').maybeSingle();
+  const activeRound = parseInt(roundSetting?.value || '1');
+  if (!activeRound) return [];
 
   const { data: bankrolls, error: bErr } = await supabase
     .from('golf_bankrolls')
