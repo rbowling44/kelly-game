@@ -4,14 +4,19 @@ import { getLeaderboard } from '../../lib/supabaseGolf';
 export default function GolfLeaderboard({ tournamentId }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => { if (tournamentId) load(); }, [tournamentId]);
 
   async function load() {
     setLoading(true);
+    setError(null);
     try {
       const data = await getLeaderboard(tournamentId);
       setRows(data || []);
+    } catch (e) {
+      console.error('Leaderboard load error:', e);
+      setError(e.message || 'Failed to load leaderboard.');
     } finally {
       setLoading(false);
     }
@@ -32,7 +37,8 @@ export default function GolfLeaderboard({ tournamentId }) {
         <div style={{ width: 100, textAlign: 'right' }}>POINTS</div>
       </div>
       {loading && <div className="empty-state">Loading...</div>}
-      {!loading && rows.length === 0 && <div className="empty-state">No standings yet. Check back after Round 1 is settled.</div>}
+      {!loading && error && <div className="empty-state" style={{ color: '#ff8070' }}>Error loading leaderboard: {error}</div>}
+      {!loading && !error && rows.length === 0 && <div className="empty-state">No standings yet. Check back after Round 1 is settled.</div>}
       {rows.map((r, i) => (
         <div key={r.user_email} style={{ display: 'flex', alignItems: 'center', padding: '12px 24px', borderBottom: '1px solid var(--line)', transition: 'background 0.1s' }}
           onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}

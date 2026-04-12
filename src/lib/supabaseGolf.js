@@ -173,10 +173,10 @@ async function getLeaderboard(tournament_id) {
   //   otherwise → SUM(points_won) from settled won wagers across all rounds
   // Never reads points_remaining — stays static during active betting.
 
-  // 1. All bankroll rows — need override_points and golf_active status
+  // 1. All bankroll rows — use * so a missing override_points column doesn't error the query
   const { data: bankrolls, error: bErr } = await supabase
     .from('golf_bankrolls')
-    .select('user_email, override_points, golf_active')
+    .select('*')
     .eq('tournament_id', tournament_id);
   if (bErr) throw bErr;
 
